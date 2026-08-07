@@ -1,0 +1,346 @@
+/**
+ * SonoraMix — production design system.
+ *
+ * A premium dark Windows audio console. Two layered depths:
+ *   - Window frame        (the app panel, soft edge-lighting)
+ *   - Control pages       (fields inside, slightly recessed)
+ *
+ * No CRT, no grid, no rack-screws. Subtle backdrop blur on panels,
+ * sharp glass edges on borders, respectful space, meticulous type scale.
+ *
+ * Palette roots (in Warm Dark):
+ *   — surface          : #14171a  panel cladding
+ *   — panel            : #0e1013  master window base
+ *   — ink              : #eef0f3  primary text
+ *   — ink-3            : #a0a6ad  secondary
+ *   — ink-5            : #666d78  tertiary / place-mark
+ *   — rule             : rgba(255,255,255,0.07)
+ *   — accent           : #ff7940  signal / active edge
+ *   — accent-2         : #2fd1b8  route / active switch
+ *   — led-green        : #3fe082
+ *   — led-amber        : #ffb020
+ *   — led-red          : #ff5d5d
+ */
+
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Segoe UI Variable", system-ui, sans-serif;
+  --font-mono: "Kode Mono", "IBM Plex Mono", "Cascadia Mono", Consolas, monospace;
+  --font-display: "Inter", "Segoe UI Variable", system-ui, sans-serif;
+
+  --color-surface: #14171a;
+  --color-surface-dim: #101215;
+  --color-panel: #0d0f12;
+  --color-panel-2: #060809;
+  --color-ink-100: #eef0f3;
+  --color-ink-300: #a0a6ad;
+  --color-ink-500: #666d78;
+  --color-rule: rgba(255, 255, 255, 0.07);
+  --color-rule-strong: rgba(255, 255, 255, 0.14);
+  --color-field: #0e1013;
+  --color-signal: #ff7940;
+  --color-route: #33d1b8;
+  --color-led-green: #3fe082;
+  --color-led-amber: #ffb020;
+  --color-led-red: #ff5d5d;
+  --color-overlay: rgba(8, 10, 12, 0.72);
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    overflow: hidden;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100vh;
+    width: 100vw;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    color: var(--color-ink-100);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background: radial-gradient(ellipse at 50% 0%, #14191c 0%, #0b0d0f 50%, #07090a 100%);
+    background-attachment: fixed;
+    overflow-x: hidden;
+  }
+
+  /* Windows 11 glass “drop” on the whole app */
+  #root {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* Custom selection */
+  ::selection {
+    background: rgba(255, 121, 64, 0.22);
+    color: #fff;
+  }
+
+  /* Form controls */
+  select option {
+    background: #1a1d20;
+    color: var(--color-ink-100);
+  }
+
+  /* Focus ring (default) */
+  :focus-visible {
+    outline: 1px solid var(--color-route);
+    outline-offset: 2px;
+  }
+
+  /* Custom scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2a2f35 transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #2a2f35;
+    border-radius: 10px;
+    border: 2px solid #0b0d0f;
+  }
+
+  /* Subtle keyboard focus ring for interactive elements */
+  button:focus-visible,
+  [role="button"]:focus-visible {
+    outline: 1px solid var(--color-route);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+@layer components {
+  /* ── typography helpers ────────────────────────────────────────── */
+  .typo-caption {
+    font-family: var(--font-sans);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-ink-300);
+  }
+  .typo-caption.dim {
+    color: var(--color-ink-500);
+  }
+  .typo-monoline {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-ink-500);
+  }
+  .typo-monoline.muted {
+    color: var(--color-ink-300);
+  }
+  .typo-number {
+    font-family: var(--font-mono);
+    font-weight: 500;
+  }
+  .typo-number.muted {
+    color: var(--color-ink-300);
+  }
+
+  /* ── glass panel (most window surface) ────────────────────────── */
+  .glass-panel {
+    background: rgba(20, 23, 26, 0.82);
+    backdrop-filter: blur(18px) saturate(1.05);
+    -webkit-backdrop-filter: blur(18px) saturate(1.05);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.02),
+      0 18px 36px rgba(0, 0, 0, 0.45);
+  }
+
+  /* Panel that sits on top of another panel — slightly brighter edge */
+  .glass-panel-light {
+    background: rgba(22, 25, 29, 0.85);
+    backdrop-filter: blur(12px) saturate(1.05);
+    -webkit-backdrop-filter: blur(12px) saturate(1.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.02),
+      0 10px 22px rgba(0, 0, 0, 0.35);
+  }
+
+  /* Inset field (controls inside a panel) */
+  .field {
+    background: var(--color-field);
+    border: 1px solid var(--color-rule);
+    border-radius: 6px;
+  }
+
+  /* Thin accent separator */
+  .rule-acc {
+    height: 1px;
+    background: var(--color-signal);
+    opacity: 0.55;
+    margin: 0;
+  }
+
+  /* Active accent edge (for the main window side) */
+  .accent-edge {
+    border-left: 2px solid var(--color-signal);
+    width: 3px;
+  }
+
+  /* ── LED indicator ─────────────────────────────────────────────── */
+  .led {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #4a525c;
+    box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.7);
+    flex: none;
+  }
+  .led-green {
+    background: var(--color-led-green);
+    box-shadow: 0 0 7px rgba(63, 224, 130, 0.7), 0 0 1.5px rgba(63, 224, 130, 0.9);
+  }
+  .led-amber {
+    background: var(--color-led-amber);
+    box-shadow: 0 0 7px rgba(255, 176, 32, 0.7), 0 0 1.5px rgba(255, 176, 32, 0.9);
+  }
+  .led-red {
+    background: var(--color-led-red);
+    box-shadow: 0 0 7px rgba(255, 93, 93, 0.7), 0 0 1.5px rgba(255, 93, 93, 0.9);
+  }
+  .led-pulse {
+    animation: led-pulse 1.6s ease-in-out infinite;
+  }
+
+  /* ── interactive buttons ───────────────────────────────────────── */
+  .btn {
+    appearance: none;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--color-ink-300);
+    font-family: var(--font-sans);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.14s ease, background 0.14s ease, border-color 0.14s ease,
+      box-shadow 0.14s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .btn:hover {
+    color: var(--color-ink-100);
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .btn:active {
+    transform: translateY(1px);
+  }
+
+  .btn-ghost {
+    color: var(--color-ink-500);
+    background: transparent;
+    border-color: transparent;
+  }
+  .btn-ghost:hover {
+    color: var(--color-ink-100);
+    background: rgba(255, 255, 255, 0.05);
+    border-color: transparent;
+  }
+
+  .btn-primary {
+    background: rgba(255, 121, 64, 0.12);
+    color: var(--color-signal);
+    border-color: rgba(255, 121, 64, 0.25);
+  }
+  .btn-primary:hover {
+    background: rgba(255, 121, 64, 0.2);
+    border-color: rgba(255, 121, 64, 0.4);
+    box-shadow: 0 0 14px rgba(255, 121, 64, 0.15);
+  }
+
+  /* Mute active state */
+  .btn-mute-active {
+    background: rgba(255, 93, 93, 0.12);
+    color: var(--color-led-red);
+    border-color: rgba(255, 93, 93, 0.25);
+    box-shadow: 0 0 12px rgba(255, 93, 93, 0.08);
+  }
+
+  /* ── select/select styling ─────────────────────────────────────── */
+  select {
+    appearance: none;
+    -webkit-appearance: none;
+    background: var(--color-field);
+    border: 1px solid var(--color-rule);
+    border-radius: 6px;
+    padding: 6px 30px 6px 10px;
+    font-size: 12px;
+    color: var(--color-ink-100);
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: border-color 0.14s ease, box-shadow 0.14s ease;
+    min-height: 26px;
+  }
+  select:hover {
+    border-color: rgba(255, 255, 255, 0.18);
+  }
+  select:focus {
+    outline: none;
+    border-color: var(--color-route);
+    box-shadow: 0 0 0 3px rgba(51, 209, 184, 0.12);
+  }
+
+  /* ── toasts ────────────────────────────────────────────────────── */
+  .toast {
+    animation: toast-in 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .toast-border-ok { border-left: 2px solid var(--color-led-green); }
+  .toast-border-info { border-left: 2px solid var(--color-led-amber); }
+  .toast-border-error { border-left: 2px solid var(--color-led-red); }
+
+  /* ── meter container ───────────────────────────────────────────── */
+  .meter-face {
+    position: relative;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+}
+
+/* ── keyframes ───────────────────────────────────────────────────── */
+@keyframes led-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(12px); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.82; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .led-pulse,
+  .toast,
+  *[class*="fade-in"] {
+    animation: none !important;
+  }
+}

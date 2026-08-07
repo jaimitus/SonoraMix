@@ -1,0 +1,23 @@
+# Node dependencies
+node_modules/
+
+# Build & Release output
+dist/
+src-tauri/target/
+
+# Tauri generated files
+src-tauri/gen/
+
+# System & OS junk
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
+
+# IDE settings
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.local
