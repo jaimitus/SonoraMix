@@ -31,7 +31,7 @@ use tracing::{debug, error, info};
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            info!("initializing SonoraMix v0.1.0");
+            info!("initializing SonoraMix v1.0.0");
 
             // Initialize the audio engine with a handle to the app for events
             let engine = AudioEngine::start(Some(app.handle().clone()));
@@ -56,6 +56,7 @@ pub fn run() {
             commands::stop_vumeter_stream,
             commands::get_engine_health,
             commands::minimize_to_tray,
+            commands::toggle_device_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("fatal error while running SonoraMix runtime");

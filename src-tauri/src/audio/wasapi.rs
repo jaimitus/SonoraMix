@@ -23,7 +23,7 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::Media::Audio::Endpoints::IAudioMeterInformation;
 use windows::Win32::Media::Audio::{
-    AudioSessionStateExpired, DEVICE_STATE_ACTIVE, eCapture, eMultimedia, eRender,
+    AudioSessionStateExpired, DEVICE_STATE_ACTIVE, DEVICE_STATE_DISABLED, eCapture, eMultimedia, eRender,
     IAudioSessionControl, IAudioSessionControl2, IAudioSessionEnumerator,
     IAudioSessionManager2, IMMDevice, IMMDeviceEnumerator, ISimpleAudioVolume,
     MMDeviceEnumerator, PKEY_AudioEndpoint_FormFactor,
@@ -70,6 +70,8 @@ pub struct DeviceInfo {
     pub form_factor: String,
     pub is_default: bool,
     pub flow: String, // "render" | "capture"
+    pub enabled: bool,
+    pub state: String, // "active" | "disabled" | "unplugged"
 }
 
 /// Single meter reading for a session.
@@ -358,15 +360,18 @@ pub unsafe fn set_session_mute(
 }
 
 pub unsafe fn read_meter(entry: &SessionEntry) -> Option<MeterSample> {
-    if entry.info.muted {
-        return Some(MeterSample {
-            peak: 0.0,
-            left: 0.0,
-            right: 0.0,
-        });
+    // Check ACTUAL mute state from COM interface (not the stale cached value,
+    // since the meter thread has its own session cache that doesn't get mute updates).
+    if let Some(vol_iface) = entry.volumes.first() {
+        if unsafe { vol_iface.GetMute().map(|b| b.as_bool()).unwrap_or(false) } {
+            return Some(MeterSample {
+                peak: 0.0,
+                left: 0.0,
+                right: 0.0,
+            });
+        }
     }
 
-    let vol = entry.info.volume.clamp(0.0, 1.0);
     let mut max_peak = 0.0f32;
     let mut max_left = 0.0f32;
     let mut max_right = 0.0f32;
@@ -394,11 +399,15 @@ pub unsafe fn read_meter(entry: &SessionEntry) -> Option<MeterSample> {
         }
     }
 
+    // Return raw WASAPI peak values WITHOUT multiplying by volume.
+    // IAudioMeterInformation::GetPeakValue() already returns post-volume levels
+    // (i.e., already attenuated by the session's ISimpleAudioVolume setting).
+    // Multiplying by volume again would square the attenuation.
     if found {
         Some(MeterSample {
-            peak: max_peak * vol,
-            left: max_left * vol,
-            right: max_right * vol,
+            peak: max_peak,
+            left: max_left,
+            right: max_right,
         })
     } else {
         None
@@ -437,7 +446,9 @@ pub unsafe fn enumerate_devices() -> SonoraResult<Vec<DeviceInfo>> {
     let mut devices = Vec::new();
 
     for (flow_dir, flow_name, default_id) in flows {
-        let collection = match unsafe { enumerator.EnumAudioEndpoints(flow_dir, DEVICE_STATE_ACTIVE) } {
+        // Enumerate both ACTIVE and DISABLED devices so we can show disabled ones in UI
+        let state_mask = windows::Win32::Media::Audio::DEVICE_STATE(DEVICE_STATE_ACTIVE.0 | DEVICE_STATE_DISABLED.0);
+        let collection = match unsafe { enumerator.EnumAudioEndpoints(flow_dir, state_mask) } {
             Ok(c) => c,
             Err(err) => {
                 warn!("enumerating {} endpoints failed: {}", flow_name, err);
@@ -452,6 +463,18 @@ pub unsafe fn enumerate_devices() -> SonoraResult<Vec<DeviceInfo>> {
             let Ok(id) = (unsafe { device.GetId() }) else { continue; };
 
             let id_str = unsafe { id.to_string() }.unwrap_or_default();
+
+            // Get device state (Active, Disabled, NotPresent, Unplugged)
+            let dev_state = unsafe { device.GetState() }.unwrap_or(DEVICE_STATE_DISABLED);
+            let enabled = dev_state == DEVICE_STATE_ACTIVE;
+            let state_str = if dev_state == DEVICE_STATE_ACTIVE {
+                "active"
+            } else if dev_state == DEVICE_STATE_DISABLED {
+                "disabled"
+            } else {
+                "unplugged"
+            };
+
             let (name, form_factor) = match read_device_properties(&device) {
                 Ok(props) => props,
                 Err(_) => (
@@ -466,6 +489,8 @@ pub unsafe fn enumerate_devices() -> SonoraResult<Vec<DeviceInfo>> {
                 name,
                 form_factor,
                 flow: flow_name.to_string(),
+                enabled,
+                state: state_str.to_string(),
             });
         }
     }
@@ -581,6 +606,23 @@ impl PolicyConfig {
         }
         Ok(())
     }
+
+    /// Enable or disable an audio endpoint via IPolicyConfig::SetEndpointVisibility.
+    /// `visible = 1` enables the device, `visible = 0` disables it.
+    unsafe fn set_endpoint_visibility(&self, device_id: &str, visible: bool) -> SonoraResult<()> {
+        let wide: Vec<u16> = device_id.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe {
+            let vtbl = *(self.raw as *const *const IPolicyConfigVtbl);
+            let hr = ((*vtbl).SetEndpointVisibility)(self.raw, PCWSTR::from_raw(wide.as_ptr()), if visible { 1 } else { 0 });
+            if hr.is_err() {
+                return Err(SonoraError::Routing(format!(
+                    "SetEndpointVisibility failed: {:?}",
+                    hr
+                )));
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Drop for PolicyConfig {
@@ -605,6 +647,19 @@ pub fn route_to_endpoint(device_id: &str) -> SonoraResult<()> {
     }
 
     info!("default audio endpoint routed to {}", device_id);
+    Ok(())
+}
+
+/// Enable or disable an audio endpoint in Windows.
+pub fn toggle_device_enabled(device_id: &str, enabled: bool) -> SonoraResult<()> {
+    ensure_com_init();
+    let policy = PolicyConfig::activate()?;
+
+    unsafe {
+        policy.set_endpoint_visibility(device_id, enabled)?;
+    }
+
+    info!("device {} {}", device_id, if enabled { "enabled" } else { "disabled" });
     Ok(())
 }
 

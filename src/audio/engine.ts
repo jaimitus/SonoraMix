@@ -21,6 +21,9 @@ export interface AudioBridge {
   /** Get current audio sessions */
   getSessions(): Promise<AudioSessionInfo[]>;
   
+  /** Get current audio devices (endpoints) */
+  getDevices(): Promise<AudioDeviceInfo[]>;
+  
   /** Set volume for a specific session */
   setVolume(id: string, volume: number): Promise<void>;
   
@@ -41,6 +44,9 @@ export interface AudioBridge {
   
   /** Subscribe to session change events. Returns unsubscribe function. */
   onSessionsChanged(callback: () => void): () => void;
+  
+  /** Enable or disable an audio endpoint in Windows */
+  toggleDeviceEnabled(deviceId: string, enabled: boolean): Promise<void>;
   
   /** Clean up resources */
   dispose(): void;
@@ -82,6 +88,10 @@ class TauriBridge implements AudioBridge {
     return invoke<AudioSessionInfo[]>("get_audio_sessions");
   }
 
+  getDevices(): Promise<AudioDeviceInfo[]> {
+    return invoke<AudioDeviceInfo[]>("get_audio_devices");
+  }
+
   setVolume(id: string, volume: number): Promise<void> {
     return invoke<void>("set_app_volume", { id, volume });
   }
@@ -100,6 +110,10 @@ class TauriBridge implements AudioBridge {
 
   minimizeToTray(): Promise<void> {
     return invoke<void>("minimize_to_tray");
+  }
+
+  toggleDeviceEnabled(deviceId: string, enabled: boolean): Promise<void> {
+    return invoke<void>("toggle_device_enabled", { deviceId, enabled });
   }
 
   onVumeter(callback: (frames: MeterFrame[]) => void): () => void {

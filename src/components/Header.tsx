@@ -1,6 +1,7 @@
 /**
  * SonoraMix header — clean glass panel with logo, separate Output and Input
  * device selectors, engine status badge, and tray minimize button.
+ * Now shows disabled devices and allows enabling/disabling them.
  */
 import type { AudioDeviceInfo, EngineMode } from "../types";
 
@@ -10,6 +11,7 @@ interface HeaderProps {
   inputDeviceId: string;
   onOutputDevice: (id: string) => void;
   onInputDevice: (id: string) => void;
+  onToggleDevice: (deviceId: string, enabled: boolean) => void;
   mode: EngineMode;
   streaming: boolean;
   onTray: () => void;
@@ -41,11 +43,15 @@ export default function Header({
   inputDeviceId,
   onOutputDevice,
   onInputDevice,
+  onToggleDevice,
   streaming,
   onTray,
 }: HeaderProps) {
   const outputDevices = devices.filter((d) => d.flow !== "capture");
   const inputDevices = devices.filter((d) => d.flow === "capture");
+
+  // Find the currently selected input device to show enable/disable toggle
+  const selectedInput = inputDevices.find((d) => d.id === inputDeviceId);
 
   return (
     <header className="sticky top-0 z-40">
@@ -78,8 +84,9 @@ export default function Header({
                   className="max-w-[200px] truncate text-[11px]"
                 >
                   {outputDevices.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name} {d.formFactor && d.formFactor !== "Speakers" ? ` · ${d.formFactor}` : ""}
+                    <option key={d.id} value={d.id} disabled={!d.enabled}>
+                      {!d.enabled ? "⛔ " : ""}{d.name} {d.formFactor && d.formFactor !== "Speakers" ? ` · ${d.formFactor}` : ""}
+                      {!d.enabled ? " [DISABLED]" : ""}
                     </option>
                   ))}
                 </select>
@@ -97,11 +104,28 @@ export default function Header({
                   className="max-w-[200px] truncate text-[11px]"
                 >
                   {inputDevices.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name} {d.formFactor ? ` · ${d.formFactor}` : ""}
+                    <option key={d.id} value={d.id} disabled={!d.enabled}>
+                      {!d.enabled ? "⛔ " : ""}{d.name} {d.formFactor ? ` · ${d.formFactor}` : ""}
+                      {!d.enabled ? " [DISABLED]" : ""}
                     </option>
                   ))}
                 </select>
+
+                {/* Enable/Disable button for the currently selected input device */}
+                {selectedInput && (
+                  <button
+                    type="button"
+                    onClick={() => onToggleDevice(selectedInput.id, !selectedInput.enabled)}
+                    className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold border transition-all cursor-pointer ${
+                      selectedInput.enabled
+                        ? "bg-green-900/30 text-green-400 border-green-500/40 hover:bg-green-800/40"
+                        : "bg-red-900/30 text-red-400 border-red-500/40 hover:bg-red-800/40"
+                    }`}
+                    title={selectedInput.enabled ? "Disable this microphone in Windows" : "Enable this microphone in Windows"}
+                  >
+                    {selectedInput.enabled ? "✅ ON" : "❌ OFF"}
+                  </button>
+                )}
               </div>
             </div>
 

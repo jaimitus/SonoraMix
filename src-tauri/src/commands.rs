@@ -145,3 +145,16 @@ pub fn minimize_to_tray(window: Window) -> Result<(), String> {
         .hide()
         .map_err(|e| format!("Failed to hide window: {}", e))
 }
+
+/// Enables or disables an audio endpoint via IPolicyConfig::SetEndpointVisibility.
+/// This allows users to activate disabled devices (e.g., PS5 controller mic)
+/// directly from the SonoraMix UI without opening Windows Sound settings.
+#[tauri::command]
+pub async fn toggle_device_enabled(
+    device_id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    wasapi::ensure_com_init();
+    wasapi::toggle_device_enabled(&device_id, enabled)
+        .map_err(|e| e.to_user_message())
+}

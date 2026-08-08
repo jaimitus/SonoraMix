@@ -235,6 +235,8 @@ function Dashboard() {
       .then(([s, d]) => {
         setSessions(s);
         setDevices(d);
+        // Restart meter stream so it picks up new/changed sessions (especially capture)
+        b.startStream().catch(() => {});
         showToast("ok", "Rescan Complete", `${s.length} active session${s.length === 1 ? "" : "s"}, ${d.length} audio endpoint${d.length === 1 ? "" : "s"}.`);
       })
       .catch((e) => showToast("error", "Rescan Failed", String(e)));
@@ -250,6 +252,28 @@ function Dashboard() {
     return () => window.removeEventListener("keydown", onKey);
   }, [rescan, bootDone]);
 
+  const handleToggleDevice = useCallback(
+    (deviceId: string, enabled: boolean) => {
+      const b = bridgeRef.current;
+      if (!b) return;
+      b.toggleDeviceEnabled(deviceId, enabled)
+        .then(() => {
+          const devName = devices.find((d) => d.id === deviceId)?.name ?? deviceId;
+          showToast("ok", enabled ? "Device Enabled" : "Device Disabled", devName);
+          // Re-fetch devices to update the state
+          return b.getDevices();
+        })
+        .then((d) => {
+          setDevices(d);
+          // Also rescan sessions since newly enabled devices may have new sessions
+          return b.getSessions();
+        })
+        .then((s) => setSessions(s))
+        .catch((e) => showToast("error", "Device Toggle Failed", String(e)));
+    },
+    [devices, showToast],
+  );
+
   const inputSessions = useMemo(() => sessions.filter((s) => s.flow === "capture"), [sessions]);
   const outputSessions = useMemo(() => sessions.filter((s) => s.flow !== "capture"), [sessions]);
   const isStreaming = stats.hz > 20;
@@ -263,6 +287,7 @@ function Dashboard() {
         inputDeviceId={inputDeviceId}
         onOutputDevice={handleOutputDevice}
         onInputDevice={handleInputDevice}
+        onToggleDevice={handleToggleDevice}
         mode={mode}
         streaming={isStreaming}
         onTray={handleTray}

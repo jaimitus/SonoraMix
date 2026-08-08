@@ -43,6 +43,10 @@ export interface AudioDeviceInfo {
   isDefault: boolean;
   /** Audio flow direction: "render" (Playback) or "capture" (Microphone Input) */
   flow: "render" | "capture";
+  /** Whether the device is currently enabled in Windows */
+  enabled: boolean;
+  /** Device state: "active" | "disabled" | "unplugged" */
+  state: "active" | "disabled" | "unplugged";
 }
 
 /**
