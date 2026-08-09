@@ -257,7 +257,176 @@ class TauriBridge implements AudioBridge {
   }
 }
 
+/**
+ * Mock bridge — activated with `?demo=1` in the URL so the full UI (channel
+ * cards, routing bars, master strip, live meters) can be previewed in a plain
+ * browser without the WASAPI backend. Emits synthetic 60 Hz meter frames.
+ */
+class MockBridge implements AudioBridge {
+  readonly mode: EngineMode = "wasapi";
+  private sessions: AudioSessionInfo[] = [];
+  private devices: AudioDeviceInfo[] = [];
+  private routed = new Map<string, string>();
+  private meterTimer: number | null = null;
+  private meterCb: ((frames: MeterFrame[]) => void) | null = null;
+  private phase = 0;
+
+  async init(): Promise<{ sessions: AudioSessionInfo[]; devices: AudioDeviceInfo[] }> {
+    this.devices = [
+      { id: "dev-speakers", name: "Realtek High Definition Audio", formFactor: "Speakers", isDefault: true, flow: "render", enabled: true, state: "active" },
+      { id: "dev-headphones", name: "WH-1000XM4 (Bluetooth)", formFactor: "Headphones", isDefault: false, flow: "render", enabled: true, state: "active" },
+      { id: "dev-hdmi", name: "Samsung Odyssey G7 (HDMI)", formFactor: "HDMI / DisplayPort", isDefault: false, flow: "render", enabled: true, state: "active" },
+      { id: "dev-mic", name: "HyperX QuadCast S", formFactor: "Microphone", isDefault: true, flow: "capture", enabled: true, state: "active" },
+      { id: "dev-mic2", name: "Realtek Microphone Array", formFactor: "Microphone", isDefault: false, flow: "capture", enabled: false, state: "disabled" },
+    ];
+    this.sessions = [
+      { id: "render:spotify.exe", pid: 4821, exe: "spotify.exe", iconBase64: null, volume: 0.82, muted: false, channels: 2, flow: "render", state: "active" },
+      { id: "render:chrome.exe", pid: 19044, exe: "chrome.exe", iconBase64: null, volume: 0.45, muted: false, channels: 2, flow: "render", state: "active" },
+      { id: "render:discord.exe", pid: 8392, exe: "discord.exe", iconBase64: null, volume: 0.66, muted: true, channels: 2, flow: "render", state: "active" },
+      { id: "render:cs2.exe", pid: 22105, exe: "cs2.exe", iconBase64: null, volume: 1.0, muted: false, channels: 2, flow: "render", state: "active" },
+      { id: "render:obs64.exe", pid: 6023, exe: "obs64.exe", iconBase64: null, volume: 0.91, muted: false, channels: 2, flow: "render", state: "active" },
+      { id: "capture:discord.exe", pid: 8392, exe: "discord.exe", iconBase64: null, volume: 0.74, muted: false, channels: 1, flow: "capture", state: "active" },
+      { id: "capture:obs64.exe", pid: 6023, exe: "obs64.exe", iconBase64: null, volume: 0.5, muted: false, channels: 1, flow: "capture", state: "inactive" },
+      { id: "render:msedge.exe", pid: 3310, exe: "msedge.exe", iconBase64: null, volume: 0.3, muted: false, channels: 2, flow: "render", state: "inactive" },
+    ];
+    this.routed.set("render:cs2.exe", "dev-headphones");
+    this.routed.set("render:discord.exe", "dev-headphones");
+    return { sessions: this.sessions, devices: this.devices };
+  }
+
+  getSessions(): Promise<AudioSessionInfo[]> {
+    return Promise.resolve(this.sessions);
+  }
+
+  getDevices(): Promise<AudioDeviceInfo[]> {
+    return Promise.resolve(this.devices);
+  }
+
+  setVolume(id: string, volume: number): Promise<void> {
+    this.sessions = this.sessions.map((s) => (s.id === id ? { ...s, volume } : s));
+    return Promise.resolve();
+  }
+
+  setMute(id: string, muted: boolean): Promise<void> {
+    this.sessions = this.sessions.map((s) => (s.id === id ? { ...s, muted } : s));
+    return Promise.resolve();
+  }
+
+  setDevice(_pid: number, deviceId: string): Promise<void> {
+    this.devices = this.devices.map((d) => ({ ...d, isDefault: d.id === deviceId }));
+    return Promise.resolve();
+  }
+
+  routeSessionDevice(pid: number, exe: string, deviceId: string): Promise<void> {
+    const s = this.sessions.find((x) => x.pid === pid && x.exe === exe);
+    if (s) this.routed.set(s.id, deviceId);
+    return Promise.resolve();
+  }
+
+  getSessionRoutedDevice(pid: number, exe: string): Promise<string> {
+    const s = this.sessions.find((x) => x.pid === pid && x.exe === exe);
+    return Promise.resolve(s ? (this.routed.get(s.id) ?? "") : "");
+  }
+
+  resetSessionDevice(pid: number, exe: string): Promise<void> {
+    const s = this.sessions.find((x) => x.pid === pid && x.exe === exe);
+    if (s) this.routed.delete(s.id);
+    return Promise.resolve();
+  }
+
+  startStream(): Promise<void> {
+    this.stopStream();
+    const tick = () => {
+      this.phase += 0.06;
+      if (this.meterCb) {
+        const frames: MeterFrame[] = this.sessions.map((s, i) => {
+          const base = s.state === "inactive" ? 0.02 : 0.25 + 0.3 * Math.abs(Math.sin(this.phase + i * 1.7));
+          const l = Math.min(1, base * (0.9 + 0.2 * Math.sin(this.phase * 1.3 + i)));
+          const r = Math.min(1, base * (0.9 + 0.2 * Math.cos(this.phase * 1.1 + i)));
+          return { id: s.id, pid: s.pid, peak: Math.max(l, r), left: l, right: r };
+        });
+        frames.push({ id: "device:render", pid: 0, peak: 0.6, left: 0.58, right: 0.55 });
+        frames.push({ id: "device:capture", pid: 0, peak: 0.35, left: 0.34, right: 0.32 });
+        this.meterCb(frames);
+      }
+      this.meterTimer = window.setTimeout(tick, 16);
+    };
+    tick();
+    return Promise.resolve();
+  }
+
+  private stopStream() {
+    if (this.meterTimer !== null) {
+      window.clearTimeout(this.meterTimer);
+      this.meterTimer = null;
+    }
+  }
+
+  minimizeToTray(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  toggleDeviceEnabled(deviceId: string, enabled: boolean): Promise<void> {
+    this.devices = this.devices.map((d) => (d.id === deviceId ? { ...d, enabled, state: enabled ? "active" : "disabled" } : d));
+    return Promise.resolve();
+  }
+
+  getMasterControl(): Promise<MasterControl> {
+    return Promise.resolve({ volume: 0.72, muted: false });
+  }
+
+  setMasterVolume(_volume: number): Promise<void> {
+    return Promise.resolve();
+  }
+
+  setMasterMute(_muted: boolean): Promise<void> {
+    return Promise.resolve();
+  }
+
+  openWindowsAppVolume(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  setCloseBehavior(_minimize: boolean): Promise<void> {
+    return Promise.resolve();
+  }
+
+  toggleGlobalMicMute(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+
+  toggleWindowVisibility(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  onVumeter(callback: (frames: MeterFrame[]) => void): () => void {
+    this.meterCb = callback;
+    return () => {
+      this.meterCb = null;
+      this.stopStream();
+    };
+  }
+
+  onSessionsChanged(_callback: () => void): () => void {
+    return () => {};
+  }
+
+  onDevicesChanged(_callback: () => void): () => void {
+    return () => {};
+  }
+
+  dispose(): void {
+    this.stopStream();
+    this.meterCb = null;
+  }
+}
+
 /** Create bridge connected to native WASAPI backend */
 export function createBridge(): AudioBridge {
+  // `?demo=1` lets the full UI be previewed in a plain browser with synthetic
+  // data and live meters (useful for visual iteration without the desktop app).
+  if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("demo")) {
+    return new MockBridge();
+  }
   return new TauriBridge();
 }

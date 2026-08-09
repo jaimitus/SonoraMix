@@ -102,10 +102,10 @@ export default function Fader({ value, onChange, disabled, showValue = true }: F
         <div className="absolute bottom-0 left-1/2 top-0 flex h-full w-8 -translate-x-1/2 items-center">
           <div className="relative flex-1 h-full">
             {/* Slot track background */}
-            <div className="absolute top-1 bottom-1 left-3 right-1.5 h-full rounded-sm bg-[#060809] border border-[rgba(255,255,255,0.06)]" />
+            <div className="absolute top-1 bottom-1 left-3 right-1.5 h-full rounded-sm bg-[#050708] border border-[rgba(255,255,255,0.08)] shadow-[inset_0_1px_3px_rgba(0,0,0,0.8)]" />
             {/* Post-fader level fill */}
             <div
-              className="absolute bottom-1 left-3 w-full bg-gradient-to-t from-[#33d1b8]/20 via-[#33d1b8]/5 to-transparent rounded-sm transition-none"
+              className="absolute bottom-1 left-3 w-full bg-gradient-to-t from-[#33d1b8]/25 via-[#33d1b8]/8 to-transparent rounded-sm transition-none"
               style={{ height: `${value * 100}%` }}
             />
             {/* Tick marks */}
@@ -134,7 +134,7 @@ export default function Fader({ value, onChange, disabled, showValue = true }: F
           aria-valuemax={100}
           aria-valuenow={pct}
           onKeyDown={onKeyDown}
-          className={`absolute left-1/2 w-8 h-7 -translate-x-1/2 border-0 rounded-sm bg-gradient-to-b from-[#1c1f24] to-[#0d0f12] shadow-[0_3px_7px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.06)] transition-none ${
+          className={`absolute left-1/2 w-8 h-7 -translate-x-1/2 border-0 rounded-sm bg-gradient-to-b from-[#23262c] to-[#0c0e11] shadow-[0_4px_8px_rgba(0,0,0,0.75),inset_0_1px_0_rgba(255,255,255,0.1)] transition-none ${
             dragging ? "cursor-grabbing" : ""
           }`}
           style={{
@@ -142,11 +142,11 @@ export default function Fader({ value, onChange, disabled, showValue = true }: F
           }}
         >
           {/* Track cap detail */}
-          <div className="absolute inset-1 mx-auto h-5 w-4 rounded-sm bg-gradient-to-b from-[#22262b] to-[#0d0f12] border border-[rgba(255,255,255,0.08)]" />
+          <div className="absolute inset-1 mx-auto h-5 w-4 rounded-sm bg-gradient-to-b from-[#2a2f36] to-[#0c0e11] border border-[rgba(255,255,255,0.1)]" />
           {/* Accent line on top of cap */}
           <div
-            className="absolute left-0 right-0 top-0 h-0.5 rounded-sm bg-gradient-to-r from-transparent via-signal/80 to-transparent"
-            style={{ opacity: value > 0 ? "1" : "0.2" }}
+            className="absolute left-0 right-0 top-0 h-0.5 rounded-sm bg-gradient-to-r from-transparent via-signal to-transparent"
+            style={{ opacity: value > 0 ? "1" : "0.25" }}
           />
         </div>
       </div>

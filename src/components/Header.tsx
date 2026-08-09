@@ -65,9 +65,9 @@ export default function Header({
 
   return (
     <header className="sticky top-0 z-40">
-      <div className="mx-auto max-w-[1480px] px-4 sm:px-6">
+      <div className="mx-auto max-w-[1600px] px-4 sm:px-6">
         <div className="glass-panel mt-3 px-4 py-3 sm:px-6">
-          <div className="mx-auto flex max-w-[1432px] items-center justify-between gap-2.5 sm:gap-4">
+          <div className="mx-auto flex max-w-[1552px] items-center justify-between gap-2.5 sm:gap-4">
             <div className="flex items-center gap-3">
               <LogoMark className="h-[28px] w-[28px]" />
               <div className="leading-none">
@@ -91,7 +91,7 @@ export default function Header({
                   value={outputDeviceId}
                   onChange={(e) => onOutputDevice(e.target.value)}
                   aria-label="Select audio playback output device"
-                  className="max-w-[200px] truncate text-[11px]"
+                  className="max-w-[240px] truncate text-[11px]"
                 >
                   {outputDevices.map((d) => (
                     <option key={d.id} value={d.id} disabled={!d.enabled}>
@@ -111,7 +111,7 @@ export default function Header({
                   value={inputDeviceId}
                   onChange={(e) => onInputDevice(e.target.value)}
                   aria-label="Select microphone recording device"
-                  className="max-w-[200px] truncate text-[11px]"
+                  className="max-w-[240px] truncate text-[11px]"
                 >
                   {inputDevices.map((d) => (
                     <option key={d.id} value={d.id} disabled={!d.enabled}>

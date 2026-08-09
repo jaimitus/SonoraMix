@@ -809,7 +809,7 @@ function Dashboard() {
       )}
 
       <main className="flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
-        <div className="mx-auto max-w-[1480px] space-y-5">
+        <div className="mx-auto max-w-[1600px] space-y-5">
           {/* Top Console Bar & View Mode Toggle */}
           <div className="glass-panel rounded-xl px-5 py-3.5 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
@@ -977,8 +977,8 @@ function Dashboard() {
                       </div>
                     ) : (
                       <div
-                        className="grid gap-3 sm:gap-3"
-                        style={{ gridTemplateColumns: "repeat(auto-fill, 240px)" }}
+                        className="grid gap-3.5 sm:gap-3.5"
+                        style={{ gridTemplateColumns: "repeat(auto-fill, 272px)" }}
                       >
                         {inputSessions.map((s, i) => (
                           <SessionCard
@@ -1045,8 +1045,8 @@ function Dashboard() {
                       </div>
                     ) : (
                       <div
-                        className="grid gap-3 sm:gap-3"
-                        style={{ gridTemplateColumns: "repeat(auto-fill, 240px)" }}
+                        className="grid gap-3.5 sm:gap-3.5"
+                        style={{ gridTemplateColumns: "repeat(auto-fill, 272px)" }}
                       >
                         {outputSessions.map((s, i) => (
                           <SessionCard
@@ -1133,50 +1133,69 @@ function MasterStrip({ index, source, deviceName, sessionsCount, volume, muted, 
 
   return (
     <article
-      className="group relative flex flex-col w-[240px] p-3.5 rounded-xl bg-panel-2/70 border border-signal/25 hover:border-signal/40 transition-[border-color,box-shadow] duration-200"
+      className="group relative flex flex-col col-span-full rounded-xl border border-signal/30 bg-gradient-to-r from-signal/10 via-panel-2/70 to-panel-2/70 hover:border-signal/50 transition-[border-color,box-shadow] duration-200"
       style={{
-        boxShadow: "inset 0 1px 0 rgba(255,121,64,0.06), 0 8px 20px rgba(0,0,0,0.25)",
+        boxShadow:
+          "inset 0 1px 0 rgba(255,121,64,0.1), 0 12px 30px rgba(0,0,0,0.4), 0 0 40px rgba(255,121,64,0.05)",
         animationDelay: `${Math.min(index, 12) * 45}ms`,
       }}
       aria-label="Master output bus"
     >
-      {/* Top Header: Master icon + device name + BUS badge */}
-      <div className="mb-3 flex items-center gap-2.5">
-        <div className="flex h-8 w-8 flex-none items-center justify-center rounded-md border border-signal/25 bg-signal/8 shadow-[0_0_10px_rgba(255,121,64,0.2)]">
-          <svg viewBox="0 0 24 24" className="h-4 w-4 text-signal" fill="none" stroke="currentColor" strokeWidth="2">
+      {/* Master header — distinct horizontal bus identity */}
+      <div className="flex flex-wrap items-center gap-3 px-4 pt-3 pb-2.5">
+        <div className="flex h-9 w-9 flex-none items-center justify-center rounded-lg border border-signal/35 bg-signal/12 shadow-[0_0_14px_rgba(255,121,64,0.3)]">
+          <svg viewBox="0 0 24 24" className="h-5 w-5 text-signal" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="7.5" />
             <path d="M12 12 8 8" strokeLinecap="round" />
             <path d="M4 12h2M20 12h2M12 4v2M12 20v2" strokeLinecap="round" opacity="0.45" />
           </svg>
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-1">
-            <h3 className="truncate font-semibold text-[12px] tracking-tight text-signal">MASTER OUT</h3>
-            <span className="rounded px-1 py-0.2 text-[8px] font-bold tracking-wider uppercase text-signal bg-signal/15 border border-signal/30">
-              BUS
+          <div className="flex items-center gap-2">
+            <h3 className="font-display text-[15px] font-bold tracking-tight text-signal">MASTER OUT</h3>
+            <span className="rounded px-1.5 py-px text-[8px] font-bold tracking-wider uppercase text-signal bg-signal/15 border border-signal/40">
+              BUS · {sessionsCount} CH
             </span>
           </div>
-          <div className="flex items-center justify-between gap-1">
-            <p className="truncate font-mono text-[9px] text-ink-500" title={deviceName}>
-              {deviceName || "awaiting endpoint…"}
-            </p>
-            <span className="shrink-0 font-mono text-[8px] text-ink-500">{sessionsCount} ch</span>
+          <p className="mt-0.5 truncate font-mono text-[10px] text-ink-400" title={deviceName}>
+            {deviceName || "awaiting endpoint…"}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => onMute(!muted)}
+            aria-pressed={muted}
+            title={muted ? "Unmute master output" : "Mute master output"}
+            className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-md px-3 text-[11px] font-bold tracking-wider transition-all ${
+              muted
+                ? "btn-mute-active"
+                : "bg-ink-800/80 text-ink-300 border border-rule/50 hover:bg-ink-700 hover:text-ink-100"
+            }`}
+          >
+            <span className={`led ${muted ? "led-red" : "led-green"}`} style={{ width: "6px", height: "6px" }} />
+            {muted ? "MUTED" : "UNMUTE"}
+          </button>
+          <div className="flex items-center gap-1.5 font-mono text-[10px] text-ink-300 bg-ink-950/80 px-2.5 py-1.5 rounded-md border border-rule/30">
+            <span className="text-[8px] text-ink-500">dBFS</span>
+            <DbReadout source={source} muted={() => mutedRef.current} className="text-[12px] text-ink-100" />
           </div>
         </div>
       </div>
 
-      {/* Main Console Strip Module: Fader | dB Scale | Meter (mirrors SessionCard) */}
-      <div className="relative flex min-h-[165px] flex-1 items-stretch gap-2 px-0.5 py-1 bg-ink-950/60 rounded-lg border border-rule/40">
-        {/* Fader Column */}
-        <div className="flex w-[72px] flex-none flex-col items-center justify-between py-1">
+      {/* Master console row: big fader | dB scale | wide stereo meter */}
+      <div className="relative mx-3 mb-3 flex items-stretch gap-3 rounded-lg border border-signal/20 bg-ink-950/70 px-3 py-2">
+        {/* Fader — larger master-style control */}
+        <div className="flex w-[84px] flex-none flex-col items-center justify-between py-0.5">
           <Fader value={volume} onChange={onVolume} showValue={false} />
-          <span className="mt-1 font-mono text-[9px] font-bold text-signal tracking-wider">
+          <span className="mt-1 font-mono text-[11px] font-bold text-signal tracking-wider">
             {Math.round(volume * 100)}%
           </span>
         </div>
 
         {/* dB Scale Markings */}
-        <div className="flex w-[26px] flex-none flex-col justify-between items-center py-2.5 font-mono text-[7px] text-ink-500 select-none border-x border-rule/30">
+        <div className="flex w-[28px] flex-none flex-col justify-between items-center py-3 font-mono text-[7px] text-ink-500 select-none border-x border-rule/30">
           <span>0dB</span>
           <span>−6</span>
           <span>−12</span>
@@ -1184,8 +1203,8 @@ function MasterStrip({ index, source, deviceName, sessionsCount, volume, muted, 
           <span>−60</span>
         </div>
 
-        {/* Meter Column */}
-        <div className="relative flex-1 min-w-0">
+        {/* Wide stereo meter */}
+        <div className="relative min-w-0 flex-1">
           <div className="meter-face h-full">
             <VumeterCanvas
               source={source}
@@ -1195,29 +1214,6 @@ function MasterStrip({ index, source, deviceName, sessionsCount, volume, muted, 
               }`}
             />
           </div>
-        </div>
-      </div>
-
-      {/* Bottom Footer: Mute + live dBFS readout */}
-      <div className="mt-2.5 flex items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={() => onMute(!muted)}
-          aria-pressed={muted}
-          title={muted ? "Unmute master output" : "Mute master output"}
-          className={`inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2.5 text-[10px] font-bold tracking-wider transition-all ${
-            muted
-              ? "btn-mute-active"
-              : "bg-ink-800/80 text-ink-300 border border-rule/50 hover:bg-ink-700 hover:text-ink-100"
-          }`}
-        >
-          <span className={`led ${muted ? "led-red" : "led-green"}`} style={{ width: "5px", height: "5px" }} />
-          {muted ? "MUTED" : "UNMUTE"}
-        </button>
-
-        <div className="flex items-center gap-1 font-mono text-[9px] text-ink-300 bg-ink-950/80 px-2 py-1 rounded border border-rule/30">
-          <span className="text-[8px] text-ink-500">dBFS</span>
-          <DbReadout source={source} muted={() => mutedRef.current} />
         </div>
       </div>
     </article>

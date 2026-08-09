@@ -46,17 +46,13 @@ function toPpmFrac(v: number): number {
 }
 
 // Color zones: Green (-80..-12 dBFS), Yellow (-12..-3 dBFS), Red (-3..0 dBFS)
-const zoneColor = (frac: number) => {
-  if (frac < 0.70) return "hsl(150, 75%, 45%)";
-  if (frac < 0.88) return "hsl(42, 95%, 52%)";
-  return "hsl(358, 90%, 58%)";
-};
+// Vivid, high-saturation palette that reads clearly against the dark slot:
+//   green  — #25e08a   amber — #ffc01e   red — #ff3d4d
+const ZONE_BODY = ["#25e08a", "#ffc01e", "#ff3d4d"];
+const ZONE_TOP = ["#4cf0a6", "#ffd35c", "#ff6b78"];
+const ZONE_GLOW = ["rgba(37, 224, 138, 0.85)", "rgba(255, 192, 30, 0.9)", "rgba(255, 61, 77, 1)"];
 
-const zoneGlow = (frac: number) => {
-  if (frac < 0.70) return "rgba(46, 213, 115, 0.8)";
-  if (frac < 0.88) return "rgba(255, 171, 0, 0.85)";
-  return "rgba(255, 71, 87, 0.95)";
-};
+const zoneGlow = (frac: number) => ZONE_GLOW[frac < 0.70 ? 0 : frac < 0.88 ? 1 : 2]!;
 
 export default function VumeterCanvas({
   source,
@@ -113,7 +109,7 @@ export default function VumeterCanvas({
       ctx.clearRect(0, 0, cssW, cssH);
 
       // Meter slot background
-      ctx.fillStyle = "rgba(6, 8, 10, 0.85)";
+      ctx.fillStyle = "rgba(6, 8, 10, 0.92)";
       ctx.fillRect(0, 0, cssW, cssH);
 
       const sample = sourceRef.current();
@@ -175,42 +171,59 @@ export default function VumeterCanvas({
         const targetFrac = toPpmFrac(st.disp);
         const litCount = Math.min(segCount, Math.round(targetFrac * segCount));
 
+        // Pre-create the three zone gradients ONCE per column (not per segment):
+        // the gradient spans the full column height and is reused for every
+        // lit segment in its zone, avoiding ~thousands of allocations/sec.
+        const gradCache: CanvasGradient[] = [];
+        for (let z = 0; z < 3; z++) {
+          const g = ctx.createLinearGradient(0, 0, 0, cssH);
+          g.addColorStop(0, ZONE_TOP[z]!);
+          g.addColorStop(0.5, ZONE_BODY[z]!);
+          g.addColorStop(1, ZONE_BODY[z]!);
+          gradCache.push(g);
+        }
+
         for (let s = 0; s < segCount; s++) {
           const y = cssH - segH - s * (segH + segGap);
           const frac = (s + 0.5) / segCount;
 
           if (s >= litCount) {
-            // Dark unlit segment
-            ctx.fillStyle = "rgba(28, 32, 38, 0.45)";
+            // Dark unlit segment — deep recess so lit LEDs pop
+            ctx.fillStyle = "rgba(22, 26, 32, 0.7)";
             ctx.fillRect(x + inset + 0.5, y, colW - inset * 2 - 1, segH - 0.5);
             continue;
           }
 
-          // Active LED segment
-          const baseColor = zoneColor(frac);
-          ctx.fillStyle = baseColor;
+          const zone = frac < 0.70 ? 0 : frac < 0.88 ? 1 : 2;
+
+          // Active LED segment — vertical gradient (bright top, rich body)
+          ctx.fillStyle = gradCache[zone]!;
           ctx.fillRect(x + inset + 0.5, y, colW - inset * 2 - 1, segH - 0.5);
 
           // Emissive glow on leading top segment
           if (s === litCount - 1) {
             ctx.save();
             ctx.shadowColor = zoneGlow(frac);
-            ctx.shadowBlur = 8;
+            ctx.shadowBlur = 10;
             ctx.fillRect(x + inset + 0.5, y, colW - inset * 2 - 1, segH - 0.5);
             ctx.restore();
           }
 
-          // Highlight reflection on segment top
-          ctx.fillStyle = "rgba(255, 255, 255, 0.12)";
-          ctx.fillRect(x + inset + 0.5, y, colW - inset * 2 - 1, 0.8);
+          // Specular reflection on segment top
+          ctx.fillStyle = "rgba(255, 255, 255, 0.28)";
+          ctx.fillRect(x + inset + 0.5, y, colW - inset * 2 - 1, 1);
         }
 
-        // Peak-hold line
+        // Peak-hold line — bright, thin, clearly readable
         const peakFrac = toPpmFrac(st.peak);
         if (peakFrac > 0.02) {
           const py = cssH - peakFrac * cssH;
-          ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+          ctx.save();
+          ctx.shadowColor = "rgba(255, 255, 255, 0.8)";
+          ctx.shadowBlur = 3;
+          ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
           ctx.fillRect(x + inset + 0.5, Math.max(0, py - 1), colW - inset * 2 - 1, 1.5);
+          ctx.restore();
         }
 
         // Clip indicator flash (top red bar)
@@ -222,7 +235,7 @@ export default function VumeterCanvas({
         }
 
         // Column border line
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.06)";
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.09)";
         ctx.lineWidth = 0.5;
         ctx.strokeRect(x + 0.5, 0.5, colW - 1, cssH - 1);
       }

@@ -53,7 +53,7 @@ function Row({
           </svg>
         )}
       </div>
-      <div className="w-[132px] min-w-0 flex-none">
+      <div className="w-[150px] min-w-0 flex-none">
         <p
           className={`text-[9px] font-bold uppercase tracking-widest ${
             signal ? "text-signal" : "text-route"
@@ -65,7 +65,7 @@ function Row({
           {name || "—"}
         </p>
       </div>
-      <div className="meter-face h-8 min-w-0 flex-1">
+      <div className="meter-face h-9 min-w-0 flex-1">
         <VumeterCanvas source={source} channels={2} className="h-full w-full" />
       </div>
       <span className="flex w-[58px] flex-none items-center justify-center gap-1 rounded border border-rule/30 bg-ink-950/80 px-1 py-1 font-mono">
