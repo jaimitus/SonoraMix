@@ -334,24 +334,27 @@ class MockBridge implements AudioBridge {
     return Promise.resolve();
   }
 
-  startStream(): Promise<void> {
+startStream(): Promise<void> {
     this.stopStream();
-    const tick = () => {
-      this.phase += 0.06;
+    // Emit an immediate first frame (headless screenshots / fast previews may
+    // capture before the first 16ms timeout fires) and then keep animating.
+    const tick = (immediate: boolean) => {
+      if (!immediate) this.phase += 0.06;
       if (this.meterCb) {
         const frames: MeterFrame[] = this.sessions.map((s, i) => {
-          const base = s.state === "inactive" ? 0.02 : 0.25 + 0.3 * Math.abs(Math.sin(this.phase + i * 1.7));
-          const l = Math.min(1, base * (0.9 + 0.2 * Math.sin(this.phase * 1.3 + i)));
-          const r = Math.min(1, base * (0.9 + 0.2 * Math.cos(this.phase * 1.1 + i)));
+          // Generous base level so demo meters read as clearly lit.
+          const base = s.state === "inactive" ? 0.05 : 0.5 + 0.32 * Math.abs(Math.sin(this.phase + i * 1.7));
+          const l = Math.min(1, base * (0.92 + 0.16 * Math.sin(this.phase * 1.3 + i)));
+          const r = Math.min(1, base * (0.92 + 0.16 * Math.cos(this.phase * 1.1 + i)));
           return { id: s.id, pid: s.pid, peak: Math.max(l, r), left: l, right: r };
         });
-        frames.push({ id: "device:render", pid: 0, peak: 0.6, left: 0.58, right: 0.55 });
-        frames.push({ id: "device:capture", pid: 0, peak: 0.35, left: 0.34, right: 0.32 });
+        frames.push({ id: "device:render", pid: 0, peak: 0.68, left: 0.66, right: 0.63 });
+        frames.push({ id: "device:capture", pid: 0, peak: 0.42, left: 0.41, right: 0.39 });
         this.meterCb(frames);
       }
-      this.meterTimer = window.setTimeout(tick, 16);
+      this.meterTimer = window.setTimeout(() => tick(false), 16);
     };
-    tick();
+    tick(true);
     return Promise.resolve();
   }
 
