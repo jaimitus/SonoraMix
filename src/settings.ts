@@ -10,6 +10,19 @@
 
 export type AccentId = "orange" | "emerald" | "ocean" | "blossom" | "violet" | "gold";
 
+/** Configurable global shortcuts (accelerator strings, e.g. "Ctrl+Shift+M"). */
+export interface Shortcuts {
+  /** Toggle the system microphone mute */
+  micMute: string;
+  /** Show / hide the SonoraMix window */
+  toggleWindow: string;
+}
+
+export const DEFAULT_SHORTCUTS: Shortcuts = {
+  micMute: "Ctrl+Shift+M",
+  toggleWindow: "Alt+Shift+S",
+};
+
 export interface AppSettings {
   /** Accent color theme applied to the whole console */
   accent: AccentId;
@@ -19,6 +32,8 @@ export interface AppSettings {
   launchMinimized: boolean;
   /** Launch SonoraMix automatically when Windows starts */
   autostart: boolean;
+  /** Global shortcut combinations */
+  shortcuts: Shortcuts;
 }
 
 export interface PersistedState {
@@ -36,6 +51,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   closeToTray: true,
   launchMinimized: false,
   autostart: false,
+  shortcuts: DEFAULT_SHORTCUTS,
 };
 
 const DEFAULTS: PersistedState = {

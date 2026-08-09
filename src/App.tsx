@@ -20,7 +20,11 @@ import { createBridge, type AudioBridge } from "./audio/engine";
 import { checkForUpdates, currentVersion, installUpdate, isTauri, APP_VERSION } from "./updater";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { disable as disableAutostart, enable as enableAutostart } from "@tauri-apps/plugin-autostart";
-import { register as registerShortcut, unregister as unregisterShortcut } from "@tauri-apps/plugin-global-shortcut";
+import {
+  register as registerShortcut,
+  unregister as unregisterShortcut,
+  type ShortcutEvent,
+} from "@tauri-apps/plugin-global-shortcut";
 import { LogicalPosition, LogicalSize, getCurrentWindow } from "@tauri-apps/api/window";
 import DeviceMeters from "./components/DeviceMeters";
 import Header from "./components/Header";
@@ -112,6 +116,8 @@ function Dashboard() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // Last set of shortcuts known to be registered (used to revert a failed change).
+  const lastActiveShortcutsRef = useRef(persisted.settings.shortcuts);
 
   const showToast = useCallback((kind: ToastItem["kind"], title: string, body?: string) => {
     const id = ++toastIdRef.current;
@@ -207,40 +213,75 @@ function Dashboard() {
     else disableAutostart().catch(() => {});
   }, [persisted.settings.autostart]);
 
-  // ── Global shortcuts (desktop only) ─────────────────────────────
+  // ── Global shortcuts (desktop only, configurable) ───────────────
   // Each shortcut gets its own handler (no string matching — the plugin's
-  // canonical rendering of modifiers is version-dependent).
-  // Ctrl+Shift+M → toggle the system microphone mute
-  // Alt+Shift+S  → show/hide the SonoraMix window
+  // canonical rendering of modifiers is version-dependent). When a new
+  // combination can't be registered (invalid or already in use by another
+  // app) the setting reverts to the previously active one and the user is
+  // notified.
   useEffect(() => {
     if (!isTauri()) return;
+    const shortcuts = persisted.settings.shortcuts;
+    const prev = lastActiveShortcutsRef.current;
     const unregisters: Array<() => Promise<void>> = [];
-    const shortcutTaken = (key: string) =>
-      showToast("error", "Shortcut Unavailable", `${key} is already in use by another app.`);
+    let disposed = false;
 
-    registerShortcut("Ctrl+Shift+M", (event) => {
-      if (event.state !== "Pressed") return;
-      bridgeRef.current
-        ?.toggleGlobalMicMute()
-        .then((muted) =>
-          showToast("ok", "Global Mic Mute", muted ? "Microphone muted 🔇" : "Microphone unmuted 🎙️")
-        )
-        .catch((e) => showToast("error", "Mic Mute Failed", String(e)));
-    })
-      .then(() => unregisters.push(() => unregisterShortcut("Ctrl+Shift+M")))
-      .catch(() => shortcutTaken("Ctrl+Shift+M"));
+    const registerOne = (key: string, handler: (event: ShortcutEvent) => void) =>
+      registerShortcut(key, handler)
+        .then(() => {
+          unregisters.push(() => unregisterShortcut(key));
+          return true as const;
+        })
+        .catch(() => false as const);
 
-    registerShortcut("Alt+Shift+S", (event) => {
-      if (event.state !== "Pressed") return;
-      bridgeRef.current?.toggleWindowVisibility().catch(() => {});
-    })
-      .then(() => unregisters.push(() => unregisterShortcut("Alt+Shift+S")))
-      .catch(() => shortcutTaken("Alt+Shift+S"));
+    (async () => {
+      const okMute = await registerOne(shortcuts.micMute, (event) => {
+        if (disposed || event.state !== "Pressed") return;
+        bridgeRef.current
+          ?.toggleGlobalMicMute()
+          .then((muted) =>
+            showToast("ok", "Global Mic Mute", muted ? "Microphone muted 🔇" : "Microphone unmuted 🎙️")
+          )
+          .catch((e) => showToast("error", "Mic Mute Failed", String(e)));
+      });
+      const okWindow = await registerOne(shortcuts.toggleWindow, (event) => {
+        if (disposed || event.state !== "Pressed") return;
+        bridgeRef.current?.toggleWindowVisibility().catch(() => {});
+      });
+
+      if (disposed) return;
+
+      if (!okMute) {
+        showToast("error", "Shortcut Unavailable", `${shortcuts.micMute} is already in use or invalid.`);
+        if (shortcuts.micMute !== prev.micMute) {
+          setPersisted((p) => ({
+            ...p,
+            settings: { ...p.settings, shortcuts: { ...p.settings.shortcuts, micMute: prev.micMute } },
+          }));
+        }
+      }
+      if (!okWindow) {
+        showToast("error", "Shortcut Unavailable", `${shortcuts.toggleWindow} is already in use or invalid.`);
+        if (shortcuts.toggleWindow !== prev.toggleWindow) {
+          setPersisted((p) => ({
+            ...p,
+            settings: {
+              ...p.settings,
+              shortcuts: { ...p.settings.shortcuts, toggleWindow: prev.toggleWindow },
+            },
+          }));
+        }
+      }
+      if (okMute && okWindow) {
+        lastActiveShortcutsRef.current = shortcuts;
+      }
+    })();
 
     return () => {
+      disposed = true;
       unregisters.forEach((un) => un().catch(() => {}));
     };
-  }, [showToast]);
+  }, [persisted.settings.shortcuts, showToast]);
 
   // ── Launch minimized to tray ────────────────────────────────────
   useEffect(() => {

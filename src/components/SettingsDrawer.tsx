@@ -1,8 +1,11 @@
 /**
  * Settings drawer — sliding panel for appearance + behavior preferences.
- * Opened from the gear button in the header.
+ * Opened from the gear button in the header. Includes a shortcut recorder
+ * that captures a key combination (with at least one modifier) to assign it
+ * to an action.
  */
-import { ACCENTS, type AppSettings } from "../settings";
+import { useEffect, useState } from "react";
+import { ACCENTS, DEFAULT_SHORTCUTS, type AppSettings, type Shortcuts } from "../settings";
 
 interface SettingsDrawerProps {
   open: boolean;
@@ -13,6 +16,8 @@ interface SettingsDrawerProps {
   /** Whether we're inside the Tauri webview (autostart etc. only apply there) */
   desktop: boolean;
 }
+
+type ShortcutAction = keyof Shortcuts;
 
 function Toggle({
   checked,
@@ -61,6 +66,34 @@ function Toggle({
   );
 }
 
+const MODIFIER_KEYS = new Set(["Control", "Shift", "Alt", "Meta"]);
+
+/** Normalize a KeyboardEvent key to an accelerator token (or null to ignore). */
+function normalizeKey(key: string): string | null {
+  if (key === " ") return "Space";
+  if (/^[a-z]$/i.test(key)) return key.toUpperCase();
+  if (/^[0-9]$/.test(key)) return key;
+  if (/^F([1-9]|1[0-2])$/i.test(key)) return key.toUpperCase();
+  if (key === "ArrowUp") return "Up";
+  if (key === "ArrowDown") return "Down";
+  if (key === "ArrowLeft") return "Left";
+  if (key === "ArrowRight") return "Right";
+  return null;
+}
+
+/** Build an accelerator string ("Ctrl+Shift+M") from a KeyboardEvent, or null. */
+function comboFromEvent(e: KeyboardEvent): string | null {
+  const mods: string[] = [];
+  if (e.ctrlKey) mods.push("Ctrl");
+  if (e.altKey) mods.push("Alt");
+  if (e.shiftKey) mods.push("Shift");
+  if (e.metaKey) mods.push("Win");
+  if (mods.length === 0) return null; // require at least one modifier
+  const key = normalizeKey(e.key);
+  if (!key) return null;
+  return [...mods, key].join("+");
+}
+
 export default function SettingsDrawer({
   open,
   settings,
@@ -69,7 +102,42 @@ export default function SettingsDrawer({
   appVersion,
   desktop,
 }: SettingsDrawerProps) {
+  const [recording, setRecording] = useState<ShortcutAction | null>(null);
+
+  // Capture the key combination while recording (before other handlers).
+  useEffect(() => {
+    if (!open || !recording) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") {
+        setRecording(null);
+        return;
+      }
+      if (MODIFIER_KEYS.has(e.key)) return; // wait for the actual key
+      const combo = comboFromEvent(e);
+      if (!combo) return;
+      onUpdate("shortcuts", { ...settings.shortcuts, [recording]: combo });
+      setRecording(null);
+    };
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
+  }, [open, recording, settings.shortcuts, onUpdate]);
+
   if (!open) return null;
+
+  const shortcutRows: { action: ShortcutAction; label: string; description: string }[] = [
+    {
+      action: "micMute",
+      label: "Toggle microphone mute",
+      description: "Mute/unmute the system mic from anywhere.",
+    },
+    {
+      action: "toggleWindow",
+      label: "Show / hide window",
+      description: "Summon or hide SonoraMix from anywhere.",
+    },
+  ];
 
   return (
     <>
@@ -161,25 +229,58 @@ export default function SettingsDrawer({
           <section>
             <h3 className="typo-caption mb-2.5 text-[10px] font-bold">Global Shortcuts</h3>
             <div className="space-y-2">
-              <div className="flex items-center justify-between gap-3 rounded-lg bg-ink-950/70 border border-rule px-3 py-2">
-                <div className="min-w-0">
-                  <p className="text-[12px] font-semibold tracking-tight text-ink-100">Toggle microphone mute</p>
-                  <p className="mt-0.5 text-[10px] leading-snug text-ink-500">Mute/unmute the system mic from anywhere.</p>
-                </div>
-                <kbd className="shrink-0 rounded border border-rule-strong bg-ink-900 px-1.5 py-0.5 font-mono text-[10px] text-ink-100">
-                  Ctrl+Shift+M
-                </kbd>
-              </div>
-              <div className="flex items-center justify-between gap-3 rounded-lg bg-ink-950/70 border border-rule px-3 py-2">
-                <div className="min-w-0">
-                  <p className="text-[12px] font-semibold tracking-tight text-ink-100">Show / hide window</p>
-                  <p className="mt-0.5 text-[10px] leading-snug text-ink-500">Summon or hide SonoraMix from anywhere.</p>
-                </div>
-                <kbd className="shrink-0 rounded border border-rule-strong bg-ink-900 px-1.5 py-0.5 font-mono text-[10px] text-ink-100">
-                  Alt+Shift+S
-                </kbd>
-              </div>
+              {shortcutRows.map(({ action, label, description }) => {
+                const isRecording = recording === action;
+                return (
+                  <div key={action} className={`toggle-row ${isRecording ? "border-route/50" : ""}`}>
+                    <div className="min-w-0">
+                      <p className="text-[12px] font-semibold tracking-tight text-ink-100">{label}</p>
+                      <p className="mt-0.5 text-[10px] leading-snug text-ink-500">
+                        {isRecording ? "Press your combination… (Esc to cancel)" : description}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setRecording(isRecording ? null : action)}
+                        aria-label={`${label}, current shortcut ${settings.shortcuts[action]}, click to record`}
+                        title="Click to record a new combination"
+                        className={`flex items-center gap-1 rounded border px-2 py-0.5 font-mono text-[10px] transition-colors ${
+                          isRecording
+                            ? "border-route/50 bg-route/10 text-route"
+                            : "border-rule-strong bg-ink-900 text-ink-100 hover:border-route/40"
+                        }`}
+                      >
+                        {isRecording ? (
+                          <>
+                            <span className="led led-amber led-pulse" style={{ width: "5px", height: "5px" }} />
+                            REC…
+                          </>
+                        ) : (
+                          settings.shortcuts[action]
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onUpdate("shortcuts", { ...settings.shortcuts, [action]: DEFAULT_SHORTCUTS[action] })}
+                        title="Reset to default shortcut"
+                        aria-label={`Reset ${label} shortcut to default`}
+                        className="flex h-6 w-6 items-center justify-center rounded text-ink-500 transition-colors hover:bg-ink-800 hover:text-ink-100"
+                      >
+                        <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                          <path d="M13 8a5 5 0 1 1-1.5-3.5" strokeLinecap="round" />
+                          <path d="M13 1.5v3h-3" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
+            <p className="mt-2 text-[10px] leading-snug text-ink-500">
+              Click a shortcut to record a new combination (needs a modifier key). If it's already
+              used by another app, it won't be assigned.
+            </p>
           </section>
 
           {/* About */}
