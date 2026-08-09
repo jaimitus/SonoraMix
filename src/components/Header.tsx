@@ -15,6 +15,9 @@ interface HeaderProps {
   mode: EngineMode;
   streaming: boolean;
   onTray: () => void;
+  onCheckUpdates: () => void;
+  checkingUpdates: boolean;
+  updateAvailable: boolean;
 }
 
 function LogoMark({ className }: { className?: string }) {
@@ -46,6 +49,9 @@ export default function Header({
   onToggleDevice,
   streaming,
   onTray,
+  onCheckUpdates,
+  checkingUpdates,
+  updateAvailable,
 }: HeaderProps) {
   const outputDevices = devices.filter((d) => d.flow !== "capture");
   const inputDevices = devices.filter((d) => d.flow === "capture");
@@ -140,6 +146,54 @@ export default function Header({
                 {streaming ? "WASAPI LIVE" : "WASAPI STANDBY"}
               </span>
             </div>
+
+            <button
+              type="button"
+              onClick={onCheckUpdates}
+              disabled={checkingUpdates}
+              className={`btn relative ${updateAvailable ? "btn-primary" : "btn-ghost"}`}
+              title={
+                checkingUpdates
+                  ? "Checking for updates…"
+                  : updateAvailable
+                    ? "A new version is available — check again"
+                    : "Check for updates on GitHub"
+              }
+              aria-label="Check for updates"
+            >
+              {checkingUpdates ? (
+                <svg
+                  viewBox="0 0 16 16"
+                  className="h-3.5 w-3.5 animate-spin"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  aria-hidden="true"
+                >
+                  <path d="M13.5 8a5.5 5.5 0 1 1-1.7-4" strokeLinecap="round" />
+                </svg>
+              ) : (
+                <svg
+                  viewBox="0 0 16 16"
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M4.5 6.5A3.5 3.5 0 1 1 8 3a3.5 3.5 0 0 1 4 2.5A2.5 2.5 0 0 1 12 10.5H10"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path d="M8 8v4M6.2 10.2 8 12l1.8-1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+              <span className="hidden sm:inline text-[12px]">
+                {checkingUpdates ? "Checking…" : updateAvailable ? "Update" : "Updates"}
+              </span>
+              {updateAvailable && <span className="led led-green led-pulse" aria-hidden="true" />}
+            </button>
 
             <button
               type="button"

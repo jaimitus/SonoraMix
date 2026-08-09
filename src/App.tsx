@@ -15,14 +15,24 @@ import type {
   ToastItem,
 } from "./types";
 import { createBridge, type AudioBridge } from "./audio/engine";
+import { checkForUpdates, currentVersion, installUpdate, isTauri, APP_VERSION } from "./updater";
+import type { Update } from "@tauri-apps/plugin-updater";
 import Header from "./components/Header";
 import SessionCard from "./components/SessionCard";
 import StatusBar from "./components/StatusBar";
+import UpdateBanner from "./components/UpdateBanner";
 import VumeterCanvas, { DbReadout } from "./components/VumeterCanvas";
 
 const ZERO_LEVEL: LevelSample = { peak: 0, left: 0, right: 0, ts: 0 };
 
 interface EBState { hasError: boolean; message: string }
+
+/** State machine for the in-app update flow. */
+type UpdateUiState =
+  | { kind: "idle" }
+  | { kind: "checking" }
+  | { kind: "available"; update: Update }
+  | { kind: "downloading"; update: Update; progress: number };
 
 class ErrorBoundary extends Component<{ children: React.ReactNode }, EBState> {
   state: EBState = { hasError: false, message: "" };
@@ -77,12 +87,70 @@ function Dashboard() {
   const [stats, setStats] = useState({ hz: 0, frames: 0 });
   const [masterDb, setMasterDb] = useState("−∞");
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [updateUi, setUpdateUi] = useState<UpdateUiState>({ kind: "idle" });
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+  const [appVersion, setAppVersion] = useState(APP_VERSION);
+  const updateBusyRef = useRef(false);
 
   const showToast = useCallback((kind: ToastItem["kind"], title: string, body?: string) => {
     const id = ++toastIdRef.current;
     setToasts((prev) => [...prev.slice(-3), { id, kind, title, body }]);
     window.setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4500);
   }, []);
+
+  const handleCheckUpdates = useCallback(
+    async (opts?: { auto?: boolean }) => {
+      if (updateBusyRef.current) return;
+      updateBusyRef.current = true;
+      setUpdateUi({ kind: "checking" });
+      const result = await checkForUpdates();
+      updateBusyRef.current = false;
+      if (result.status === "update-available") {
+        setUpdateDismissed(false);
+        setUpdateUi({ kind: "available", update: result.update });
+        if (!opts?.auto) {
+          showToast("info", "Update Available", `SonoraMix ${result.version} is ready to download.`);
+        }
+      } else if (result.status === "up-to-date") {
+        setUpdateUi({ kind: "idle" });
+        if (!opts?.auto) {
+          showToast("ok", "Up to Date", `You are running the latest version (${result.current}).`);
+        }
+      } else if (result.status === "error") {
+        setUpdateUi({ kind: "idle" });
+        if (!opts?.auto) showToast("error", "Update Check Failed", result.message);
+      } else {
+        setUpdateUi({ kind: "idle" });
+      }
+    },
+    [showToast],
+  );
+
+  const handleInstallUpdate = useCallback(async () => {
+    if (updateUi.kind !== "available") return;
+    const update = updateUi.update;
+    setUpdateUi({ kind: "downloading", update, progress: 0 });
+    try {
+      await installUpdate(update, ({ ratio }) => {
+        setUpdateUi({ kind: "downloading", update, progress: ratio });
+      });
+    } catch (e) {
+      setUpdateUi({ kind: "available", update });
+      showToast("error", "Update Failed", String(e));
+    }
+  }, [updateUi, showToast]);
+
+  // Resolve the real runtime version for the footer / boot overlay.
+  useEffect(() => {
+    currentVersion().then(setAppVersion).catch(() => {});
+  }, []);
+
+  // Auto-check for updates shortly after startup (desktop only).
+  useEffect(() => {
+    if (!isTauri()) return;
+    const t = window.setTimeout(() => handleCheckUpdates({ auto: true }), 4000);
+    return () => window.clearTimeout(t);
+  }, [handleCheckUpdates]);
 
   const sessionSource = useCallback((id: string): LevelSource => () => levelsRef.current.get(id) ?? ZERO_LEVEL, []);
   const masterSource = useCallback<LevelSource>(() => masterRef.current, []);
@@ -291,7 +359,20 @@ function Dashboard() {
         mode={mode}
         streaming={isStreaming}
         onTray={handleTray}
+        onCheckUpdates={() => handleCheckUpdates()}
+        checkingUpdates={updateUi.kind === "checking"}
+        updateAvailable={updateUi.kind === "available" || updateUi.kind === "downloading"}
       />
+
+      {(updateUi.kind === "available" || updateUi.kind === "downloading") && !updateDismissed && (
+        <UpdateBanner
+          update={updateUi.update}
+          installing={updateUi.kind === "downloading"}
+          progress={updateUi.kind === "downloading" ? updateUi.progress : 0}
+          onInstall={handleInstallUpdate}
+          onDismiss={() => setUpdateDismissed(true)}
+        />
+      )}
 
       <main className="flex-1 min-h-0 overflow-y-auto px-4 py-4 sm:px-6">
         <div className="mx-auto max-w-[1480px] space-y-5">
@@ -455,7 +536,7 @@ function Dashboard() {
           )}
 
         <div className="mt-4 text-center typo-caption text-ink-500 flex flex-wrap items-center justify-center gap-2 pb-2">
-          <span>SonoraMix v1.0.0 — Native WASAPI Session API · IPolicyConfig Endpoint Routing · 60 Hz Phase-Locked Stream</span>
+          <span>SonoraMix v{appVersion} — Native WASAPI Session API · IPolicyConfig Endpoint Routing · 60 Hz Phase-Locked Stream</span>
           <span className="text-rule/60">•</span>
           <button
             type="button"
@@ -482,7 +563,7 @@ function Dashboard() {
 
       <ToastStack toasts={toasts} onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
 
-      {!bootDone && <BootOverlay onDone={() => setBootDone(true)} />}
+      {!bootDone && <BootOverlay version={appVersion} onDone={() => setBootDone(true)} />}
     </div>
   );
 }
@@ -542,31 +623,6 @@ function MasterStrip({ index, source, deviceName, sessionsCount }: {
         </div>
       </div>
     </article>
-  );
-}
-
-function EmptyState({ onRescan }: { onRescan: () => void }) {
-  return (
-    <div
-      className="flex flex-col items-center rounded-lg border border-dashed border-ink-500/40 px-8 py-16 text-center"
-      style={{ background: "rgba(20,23,26,0.3)" }}
-    >
-      <svg className="h-11 w-11 text-ink-500/70" viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <rect x="6" y="18" width="6" height="6" rx="1" />
-        <rect x="14" y="12" width="6" height="12" rx="1" fill="currentColor" fillOpacity="0.4" />
-        <rect x="22" y="16" width="6" height="8" rx="1" fill="currentColor" fillOpacity="0.6" />
-      </svg>
-      <h2 className="mt-4 font-medium text-[14px] tracking-tight text-ink-100">No active audio sessions</h2>
-      <p className="mt-1.5 max-w-xs text-[12px] text-ink-300">
-        Start playback in any application — channel strips appear automatically.
-      </p>
-      <button type="button" onClick={onRescan} className="btn btn-primary mt-4">
-        <svg viewBox="0 0 10 6" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="M1 1l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        Rescan Sessions
-      </button>
-    </div>
   );
 }
 
@@ -638,7 +694,7 @@ const BOOT_STEPS = [
   { text: "Meter stream · 60 Hz phase-locked", status: "LIVE" as const },
 ];
 
-function BootOverlay({ onDone }: { onDone: () => void }) {
+function BootOverlay({ version, onDone }: { version: string; onDone: () => void }) {
   const [count, setCount] = useState(0);
   const [fading, setFading] = useState(false);
   const doneRef = useRef(false);
@@ -686,7 +742,7 @@ function BootOverlay({ onDone }: { onDone: () => void }) {
       <h1 className="mt-4 font-display text-2xl font-bold tracking-[0.3em] text-ink-100">
         Sonora<span className="text-signal">Mix</span>
       </h1>
-      <p className="typo-caption mt-1.5">Audio Session Console · v0.1.0</p>
+      <p className="typo-caption mt-1.5">Audio Session Console · v{version}</p>
 
       <div className="mt-8 w-[min(400px,86vw)] space-y-1.5 font-mono text-[11px] text-ink-300">
         {BOOT_STEPS.slice(0, count).map((step, i) => (
