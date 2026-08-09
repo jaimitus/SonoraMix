@@ -14,9 +14,11 @@ use std::mem::size_of;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use tracing::{debug, info, trace, warn};
+use std::sync::OnceLock;
+
 use windows::core::{HSTRING, Interface, GUID, HRESULT, PCWSTR, PWSTR, IUnknown};
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
-use windows::Win32::Foundation::{CloseHandle, BOOL, HWND};
+use windows::Win32::Foundation::{CloseHandle, BOOL, FARPROC, HMODULE, HWND};
 use windows::Win32::Graphics::Gdi::{
     DeleteObject, GetDIBits, GetDC, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER,
     DIB_RGB_COLORS, HBITMAP, HDC,
@@ -36,6 +38,7 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
+use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
 };
@@ -755,14 +758,33 @@ const DEVINTERFACE_AUDIO_CAPTURE: &str = "#{2eef81be-33fa-4800-9670-1cd474972c3f
 
 // `RoGetActivationFactory` (api-ms-win-core-winrt-l1-1-0.dll). Declared here
 // because the `windows` crate only exposes the generic `RoGetActivationFactory<T>`
-// which requires a statically-known interface type.
-#[link(name = "api-ms-win-core-winrt-l1-1-0.dll")]
-unsafe extern "system" {
-    fn RoGetActivationFactory(
-        activatable_class_id: *const core::ffi::c_void, // HSTRING (by value)
-        class_id: *const GUID,
-        factory: *mut *mut core::ffi::c_void,
-    ) -> HRESULT;
+// which requires a statically-known interface type. Resolved at runtime via
+// `GetProcAddress` (the api-ms-* import libs are not directly linkable).
+type RoGetActivationFactoryFn = unsafe extern "system" fn(
+    activatable_class_id: *const core::ffi::c_void, // HSTRING (by value)
+    class_id: *const GUID,
+    factory: *mut *mut core::ffi::c_void,
+) -> HRESULT;
+
+fn ro_get_activation_factory() -> SonoraResult<RoGetActivationFactoryFn> {
+    static CACHED: OnceLock<Option<RoGetActivationFactoryFn>> = OnceLock::new();
+
+    let cached = CACHED.get_or_init(|| unsafe {
+        let module: HMODULE = LoadLibraryW(windows::core::w!("api-ms-win-core-winrt-l1-1-0.dll"))
+            .ok()
+            .map_or_else(|| None, Some)?;
+        let proc = GetProcAddress(module, windows::core::s!("RoGetActivationFactory"));
+        if proc.is_none() {
+            return None;
+        }
+        // SAFETY: `FARPROC` is a thin `Option<extern fn>` pointer; we validate
+        // non-null above and the exported function matches the ABI we model.
+        Some(std::mem::transmute::<FARPROC, RoGetActivationFactoryFn>(proc))
+    });
+
+    (*cached).ok_or_else(|| {
+        SonoraError::Routing("RoGetActivationFactory unavailable (winrt dll not loadable)".to_string())
+    })
 }
 
 /// Vtable of `Windows.Media.Internal.AudioPolicyConfig`.
@@ -799,14 +821,15 @@ impl AudioPolicyConfig {
         unsafe {
             let class_name = HSTRING::from("Windows.Media.Internal.AudioPolicyConfig");
             let mut raw: *mut c_void = std::ptr::null_mut();
+            let ro_get_activation_factory = ro_get_activation_factory()?;
 
-            let mut hr = RoGetActivationFactory(
+            let mut hr = ro_get_activation_factory(
                 core::mem::transmute_copy(&class_name),
                 &IID_AUDIO_POLICY_CONFIG_21H2,
                 &mut raw,
             );
             if hr.is_err() || raw.is_null() {
-                hr = RoGetActivationFactory(
+                hr = ro_get_activation_factory(
                     core::mem::transmute_copy(&class_name),
                     &IID_AUDIO_POLICY_CONFIG_DOWNLEVEL,
                     &mut raw,
