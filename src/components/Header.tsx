@@ -17,6 +17,7 @@ interface HeaderProps {
   onTray: () => void;
   onCheckUpdates: () => void;
   checkingUpdates: boolean;
+  downloading: boolean;
   updateAvailable: boolean;
 }
 
@@ -51,6 +52,7 @@ export default function Header({
   onTray,
   onCheckUpdates,
   checkingUpdates,
+  downloading,
   updateAvailable,
 }: HeaderProps) {
   const outputDevices = devices.filter((d) => d.flow !== "capture");
@@ -150,18 +152,22 @@ export default function Header({
             <button
               type="button"
               onClick={onCheckUpdates}
-              disabled={checkingUpdates}
-              className={`btn relative ${updateAvailable ? "btn-primary" : "btn-ghost"}`}
+              disabled={checkingUpdates || downloading}
+              className={`btn relative disabled:cursor-default disabled:opacity-60 ${
+                updateAvailable ? "btn-primary" : "btn-ghost"
+              }`}
               title={
                 checkingUpdates
                   ? "Checking for updates…"
-                  : updateAvailable
-                    ? "A new version is available — check again"
-                    : "Check for updates on GitHub"
+                  : downloading
+                    ? "Downloading update…"
+                    : updateAvailable
+                      ? "A new version is available — check again"
+                      : "Check for updates on GitHub"
               }
               aria-label="Check for updates"
             >
-              {checkingUpdates ? (
+              {checkingUpdates || downloading ? (
                 <svg
                   viewBox="0 0 16 16"
                   className="h-3.5 w-3.5 animate-spin"
@@ -190,7 +196,7 @@ export default function Header({
                 </svg>
               )}
               <span className="hidden sm:inline text-[12px]">
-                {checkingUpdates ? "Checking…" : updateAvailable ? "Update" : "Updates"}
+                {downloading ? "Updating…" : checkingUpdates ? "Checking…" : updateAvailable ? "Update" : "Updates"}
               </span>
               {updateAvailable && <span className="led led-green led-pulse" aria-hidden="true" />}
             </button>

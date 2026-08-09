@@ -32,7 +32,7 @@ type UpdateUiState =
   | { kind: "idle" }
   | { kind: "checking" }
   | { kind: "available"; update: Update }
-  | { kind: "downloading"; update: Update; progress: number };
+  | { kind: "downloading"; update: Update; progress: number; downloaded: number; total: number };
 
 class ErrorBoundary extends Component<{ children: React.ReactNode }, EBState> {
   state: EBState = { hasError: false, message: "" };
@@ -128,13 +128,17 @@ function Dashboard() {
 
   const handleInstallUpdate = useCallback(async () => {
     if (updateUi.kind !== "available") return;
+    updateBusyRef.current = true; // block re-checks while an install is in flight
     const update = updateUi.update;
-    setUpdateUi({ kind: "downloading", update, progress: 0 });
+    setUpdateUi({ kind: "downloading", update, progress: 0, downloaded: 0, total: 0 });
     try {
-      await installUpdate(update, ({ ratio }) => {
-        setUpdateUi({ kind: "downloading", update, progress: ratio });
+      await installUpdate(update, ({ ratio, downloaded, total }) => {
+        setUpdateUi({ kind: "downloading", update, progress: ratio, downloaded, total });
       });
+      updateBusyRef.current = false;
+      setUpdateUi({ kind: "idle" });
     } catch (e) {
+      updateBusyRef.current = false;
       setUpdateUi({ kind: "available", update });
       showToast("error", "Update Failed", String(e));
     }
@@ -142,7 +146,7 @@ function Dashboard() {
 
   // Resolve the real runtime version for the footer / boot overlay.
   useEffect(() => {
-    currentVersion().then(setAppVersion).catch(() => {});
+    currentVersion().then(setAppVersion);
   }, []);
 
   // Auto-check for updates shortly after startup (desktop only).
@@ -361,6 +365,7 @@ function Dashboard() {
         onTray={handleTray}
         onCheckUpdates={() => handleCheckUpdates()}
         checkingUpdates={updateUi.kind === "checking"}
+        downloading={updateUi.kind === "downloading"}
         updateAvailable={updateUi.kind === "available" || updateUi.kind === "downloading"}
       />
 
@@ -369,6 +374,8 @@ function Dashboard() {
           update={updateUi.update}
           installing={updateUi.kind === "downloading"}
           progress={updateUi.kind === "downloading" ? updateUi.progress : 0}
+          downloaded={updateUi.kind === "downloading" ? updateUi.downloaded : 0}
+          total={updateUi.kind === "downloading" ? updateUi.total : 0}
           onInstall={handleInstallUpdate}
           onDismiss={() => setUpdateDismissed(true)}
         />

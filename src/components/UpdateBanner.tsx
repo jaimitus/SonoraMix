@@ -13,14 +13,26 @@ interface UpdateBannerProps {
   installing: boolean;
   /** 0..1 download completion ratio */
   progress: number;
+  /** Bytes downloaded so far (0 when unknown) */
+  downloaded: number;
+  /** Total bytes to download (0 when unknown) */
+  total: number;
   onInstall: () => void;
   onDismiss: () => void;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes <= 0) return "0 MB";
+  const mb = bytes / (1024 * 1024);
+  return mb >= 100 ? `${Math.round(mb)} MB` : `${mb.toFixed(1)} MB`;
 }
 
 export default function UpdateBanner({
   update,
   installing,
   progress,
+  downloaded,
+  total,
   onInstall,
   onDismiss,
 }: UpdateBannerProps) {
@@ -76,7 +88,7 @@ export default function UpdateBanner({
             <div className="mt-1.5 flex items-center justify-between">
               <span className="typo-monoline text-[10px]">Downloading update…</span>
               <span className="typo-number text-[10px] text-ink-300">
-                {pct > 0 ? `${pct}%` : "starting"}
+                {total > 0 ? `${formatBytes(downloaded)} / ${formatBytes(total)}` : pct > 0 ? `${pct}%` : "starting"}
               </span>
             </div>
           </div>
