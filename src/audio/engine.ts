@@ -63,6 +63,12 @@ export interface AudioBridge {
   /** Set whether closing the window minimizes to tray (true) or quits (false) */
   setCloseBehavior(minimize: boolean): Promise<void>;
 
+  /** Toggle mute on the default microphone device; returns the new mute state */
+  toggleGlobalMicMute(): Promise<boolean>;
+
+  /** Toggle the main window between hidden (tray) and visible */
+  toggleWindowVisibility(): Promise<void>;
+
   /** Clean up resources */
   dispose(): void;
 }
@@ -149,6 +155,14 @@ class TauriBridge implements AudioBridge {
 
   setCloseBehavior(minimize: boolean): Promise<void> {
     return invoke<void>("set_close_behavior", { minimize });
+  }
+
+  toggleGlobalMicMute(): Promise<boolean> {
+    return invoke<boolean>("toggle_global_mic_mute");
+  }
+
+  toggleWindowVisibility(): Promise<void> {
+    return invoke<void>("toggle_window_visibility");
   }
 
   onVumeter(callback: (frames: MeterFrame[]) => void): () => void {

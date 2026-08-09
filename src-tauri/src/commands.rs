@@ -198,3 +198,25 @@ pub fn set_close_behavior(
         .store(minimize, std::sync::atomic::Ordering::Relaxed);
     Ok(())
 }
+
+/// Toggles mute on the system default microphone (capture endpoint) and
+/// returns the new mute state. Used by the global mic-mute shortcut.
+#[tauri::command]
+pub async fn toggle_global_mic_mute() -> Result<bool, String> {
+    wasapi::ensure_com_init();
+    unsafe { wasapi::toggle_default_capture_mute() }.map_err(|e| e.to_user_message())
+}
+
+/// Toggles the main window between hidden (tray) and visible. Used by the
+/// global show/hide shortcut.
+#[tauri::command]
+pub fn toggle_window_visibility(window: Window) -> Result<(), String> {
+    if window.is_visible().map_err(|e| e.to_string())? {
+        window.hide().map_err(|e| e.to_string())?;
+    } else {
+        window.show().map_err(|e| e.to_string())?;
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+    Ok(())
+}

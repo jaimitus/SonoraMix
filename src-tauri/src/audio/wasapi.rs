@@ -562,6 +562,39 @@ fn form_factor_label(raw: Option<u32>) -> String {
 // Master Volume (default render endpoint)
 // =============================================================================
 
+/// Activates the IAudioEndpointVolume of the current default **capture** endpoint
+/// (the system microphone) and toggles its mute state, returning the new state.
+/// Used by the global mic-mute shortcut.
+///
+/// # Safety
+/// Caller must have an active COM apartment.
+pub unsafe fn toggle_default_capture_mute() -> SonoraResult<bool> {
+    unsafe {
+        let enumerator: IMMDeviceEnumerator = match CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) {
+            Ok(e) => e,
+            Err(err) => {
+                warn!("creating device enumerator failed: {}", err);
+                return Err(SonoraError::DeviceEnumeration(err.to_string()));
+            }
+        };
+        let endpoint = enumerator
+            .GetDefaultAudioEndpoint(eCapture, eMultimedia)
+            .map_err(|e| SonoraError::DeviceEnumeration(format!("no default capture endpoint: {}", e)))?;
+        let volume: IAudioEndpointVolume = endpoint
+            .Activate(CLSCTX_ALL, None)
+            .map_err(|e| SonoraError::DeviceEnumeration(format!("activating capture endpoint volume: {}", e)))?;
+
+        let muted = volume.GetMute().map(|b| b.as_bool()).unwrap_or(false);
+        volume
+            .SetMute(BOOL::from(!muted), std::ptr::null())
+            .map_err(|e| SonoraError::MuteControl {
+                pid: 0,
+                err: e.to_string(),
+            })?;
+        Ok(!muted)
+    }
+}
+
 /// Activates the IAudioEndpointVolume of the current default render endpoint.
 ///
 /// # Safety

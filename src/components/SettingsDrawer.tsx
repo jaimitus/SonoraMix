@@ -157,6 +157,31 @@ export default function SettingsDrawer({
             </div>
           </section>
 
+          {/* Global Shortcuts */}
+          <section>
+            <h3 className="typo-caption mb-2.5 text-[10px] font-bold">Global Shortcuts</h3>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3 rounded-lg bg-ink-950/70 border border-rule px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-[12px] font-semibold tracking-tight text-ink-100">Toggle microphone mute</p>
+                  <p className="mt-0.5 text-[10px] leading-snug text-ink-500">Mute/unmute the system mic from anywhere.</p>
+                </div>
+                <kbd className="shrink-0 rounded border border-rule-strong bg-ink-900 px-1.5 py-0.5 font-mono text-[10px] text-ink-100">
+                  Ctrl+Shift+M
+                </kbd>
+              </div>
+              <div className="flex items-center justify-between gap-3 rounded-lg bg-ink-950/70 border border-rule px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-[12px] font-semibold tracking-tight text-ink-100">Show / hide window</p>
+                  <p className="mt-0.5 text-[10px] leading-snug text-ink-500">Summon or hide SonoraMix from anywhere.</p>
+                </div>
+                <kbd className="shrink-0 rounded border border-rule-strong bg-ink-900 px-1.5 py-0.5 font-mono text-[10px] text-ink-100">
+                  Alt+Shift+S
+                </kbd>
+              </div>
+            </div>
+          </section>
+
           {/* About */}
           <section>
             <h3 className="typo-caption mb-2.5 text-[10px] font-bold">About</h3>

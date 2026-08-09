@@ -16,6 +16,7 @@
     "core:window:allow-outer-size",
     "updater:default",
     "process:default",
-    "autostart:default"
+    "autostart:default",
+    "global-shortcut:default"
   ]
 }

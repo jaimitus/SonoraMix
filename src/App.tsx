@@ -20,6 +20,7 @@ import { createBridge, type AudioBridge } from "./audio/engine";
 import { checkForUpdates, currentVersion, installUpdate, isTauri, APP_VERSION } from "./updater";
 import type { Update } from "@tauri-apps/plugin-updater";
 import { disable as disableAutostart, enable as enableAutostart } from "@tauri-apps/plugin-autostart";
+import { register as registerShortcut, unregister as unregisterShortcut } from "@tauri-apps/plugin-global-shortcut";
 import { LogicalPosition, LogicalSize, getCurrentWindow } from "@tauri-apps/api/window";
 import Header from "./components/Header";
 import SessionCard from "./components/SessionCard";
@@ -201,6 +202,41 @@ function Dashboard() {
     if (persisted.settings.autostart) enableAutostart().catch(() => {});
     else disableAutostart().catch(() => {});
   }, [persisted.settings.autostart]);
+
+  // ── Global shortcuts (desktop only) ─────────────────────────────
+  // Each shortcut gets its own handler (no string matching — the plugin's
+  // canonical rendering of modifiers is version-dependent).
+  // Ctrl+Shift+M → toggle the system microphone mute
+  // Alt+Shift+S  → show/hide the SonoraMix window
+  useEffect(() => {
+    if (!isTauri()) return;
+    const unregisters: Array<() => Promise<void>> = [];
+    const shortcutTaken = (key: string) =>
+      showToast("error", "Shortcut Unavailable", `${key} is already in use by another app.`);
+
+    registerShortcut("Ctrl+Shift+M", (event) => {
+      if (event.state !== "Pressed") return;
+      bridgeRef.current
+        ?.toggleGlobalMicMute()
+        .then((muted) =>
+          showToast("ok", "Global Mic Mute", muted ? "Microphone muted 🔇" : "Microphone unmuted 🎙️")
+        )
+        .catch((e) => showToast("error", "Mic Mute Failed", String(e)));
+    })
+      .then(() => unregisters.push(() => unregisterShortcut("Ctrl+Shift+M")))
+      .catch(() => shortcutTaken("Ctrl+Shift+M"));
+
+    registerShortcut("Alt+Shift+S", (event) => {
+      if (event.state !== "Pressed") return;
+      bridgeRef.current?.toggleWindowVisibility().catch(() => {});
+    })
+      .then(() => unregisters.push(() => unregisterShortcut("Alt+Shift+S")))
+      .catch(() => shortcutTaken("Alt+Shift+S"));
+
+    return () => {
+      unregisters.forEach((un) => un().catch(() => {}));
+    };
+  }, [showToast]);
 
   // ── Launch minimized to tray ────────────────────────────────────
   useEffect(() => {
