@@ -709,6 +709,9 @@ function Dashboard() {
   const handleRouteSession = useCallback(
     (session: AudioSessionInfo, deviceId: string) => {
       const devName = devices.find((d) => d.id === deviceId)?.name ?? deviceId;
+      // Invalidate any in-flight routed-device fetch so its stale response
+      // can't clobber the optimistic update below (or the reset handler's).
+      routedFetchIdRef.current++;
       bridgeRef.current
         ?.routeSessionDevice(session.pid, session.exe, deviceId)
         .then(() => {
@@ -719,6 +722,25 @@ function Dashboard() {
         .catch((e) => showToast("error", "Routing Failed", String(e)));
     },
     [devices, showToast],
+  );
+
+  // Return an app to the system default output device.
+  const handleResetSession = useCallback(
+    (session: AudioSessionInfo) => {
+      routedFetchIdRef.current++;
+      bridgeRef.current
+        ?.resetSessionDevice(session.pid, session.exe)
+        .then(() => {
+          showToast("ok", "Route Reset", `${getDisplayName(session.exe)} now uses the system default device.`);
+          setRoutedDevices((prev) => {
+            const next = { ...prev };
+            delete next[session.id];
+            return next;
+          });
+        })
+        .catch((e) => showToast("error", "Reset Failed", String(e)));
+    },
+    [showToast],
   );
 
   const handleToggleDevice = useCallback(
@@ -1040,6 +1062,7 @@ function Dashboard() {
                             onRename={(name) => renameChannel(s.exe, name)}
                             renderDevices={devices.filter((d) => d.flow !== "capture")}
                             onRouteToDevice={(deviceId) => handleRouteSession(s, deviceId)}
+                            onResetRoute={() => handleResetSession(s)}
                             onRoute={handleOpenWindowsRouting}
                             routedDeviceId={routedDevices[s.id]}
                           />

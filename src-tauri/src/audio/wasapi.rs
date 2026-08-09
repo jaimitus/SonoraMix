@@ -826,20 +826,26 @@ impl AudioPolicyConfig {
 
     /// Slot 25 call: persist `device_id` (full SWD endpoint id) as the default
     /// output for `process_id` in the given role (eMultimedia = 1, eConsole = 0).
+    /// `None` clears the override — the app falls back to the system default
+    /// device (same behavior as EarTrumpet passing a null HSTRING).
     unsafe fn set_persisted_default_endpoint(
         &self,
         process_id: u32,
-        device_id: &HSTRING,
+        device_id: Option<&HSTRING>,
         role: i32,
     ) -> SonoraResult<()> {
         unsafe {
             let vtbl = *(self.raw as *const *const AudioPolicyConfigVtbl);
+            let device_ptr = match device_id {
+                Some(h) => core::mem::transmute_copy(h),
+                None => std::ptr::null(),
+            };
             let hr = ((*vtbl).SetPersistedDefaultAudioEndpoint)(
                 self.raw,
                 process_id,
                 0, // EDataFlow.eRender
                 role,
-                core::mem::transmute_copy(device_id),
+                device_ptr,
             );
             if hr.is_err() {
                 return Err(SonoraError::Routing(format!(
@@ -930,21 +936,10 @@ fn all_processes_with_image_path(target_path: &str) -> Vec<u32> {
     out
 }
 
-/// Routes an application (every process sharing its executable) to a specific
-/// output endpoint, persisting the per-app default — the same mechanism the
-/// Windows "App volume and device preferences" page uses, so routing never
-/// requires leaving SonoraMix.
-///
-/// `expected_exe` guards against pid reuse: if the process behind `pid` died
-/// and the OS recycled its id, its image path won't match the session's exe and
-/// we abort instead of routing an unrelated app.
-pub fn route_session_to_endpoint(
-    pid: u32,
-    expected_exe: &str,
-    device_id: &str,
-) -> SonoraResult<()> {
-    ensure_com_init();
-
+/// Resolves `pid` to its executable path, verifies it still matches
+/// `expected_exe` (pid-reuse guard), and returns every live process sharing
+/// that image. Shared by routing and route-reset.
+fn processes_of(pid: u32, expected_exe: &str) -> SonoraResult<(String, Vec<u32>)> {
     let exe_path = process_image_path(pid)
         .map_err(|e| SonoraError::Routing(format!("resolving process {}: {}", pid, e)))?;
     let exe = exe_path
@@ -966,6 +961,21 @@ pub fn route_session_to_endpoint(
         )));
     }
 
+    Ok((exe_path, pids))
+}
+
+/// Routes an application (every process sharing its executable) to a specific
+/// output endpoint, persisting the per-app default — the same mechanism the
+/// Windows "App volume and device preferences" page uses, so routing never
+/// requires leaving SonoraMix.
+pub fn route_session_to_endpoint(
+    pid: u32,
+    expected_exe: &str,
+    device_id: &str,
+) -> SonoraResult<()> {
+    ensure_com_init();
+    let (exe_path, pids) = processes_of(pid, expected_exe)?;
+
     let factory = AudioPolicyConfig::activate()?;
     let full_id = format!(
         "\\\\?\\SWD#MMDEVAPI#{}{}",
@@ -975,12 +985,30 @@ pub fn route_session_to_endpoint(
 
     for process_id in pids {
         unsafe {
-            factory.set_persisted_default_endpoint(process_id, &device, 1)?; // eMultimedia
-            factory.set_persisted_default_endpoint(process_id, &device, 0)?; // eConsole
+            factory.set_persisted_default_endpoint(process_id, Some(&device), 1)?; // eMultimedia
+            factory.set_persisted_default_endpoint(process_id, Some(&device), 0)?; // eConsole
         }
     }
 
     info!("routed {} (pid {}) to endpoint {}", exe_path, pid, device_id);
+    Ok(())
+}
+
+/// Removes the persisted per-app output override for an application (every
+/// process sharing its executable), returning it to the system default device.
+pub fn clear_session_routed_device(pid: u32, expected_exe: &str) -> SonoraResult<()> {
+    ensure_com_init();
+    let (exe_path, pids) = processes_of(pid, expected_exe)?;
+
+    let factory = AudioPolicyConfig::activate()?;
+    for process_id in pids {
+        unsafe {
+            factory.set_persisted_default_endpoint(process_id, None, 1)?; // eMultimedia
+            factory.set_persisted_default_endpoint(process_id, None, 0)?; // eConsole
+        }
+    }
+
+    info!("cleared per-app routing for {} (pid {})", exe_path, pid);
     Ok(())
 }
 

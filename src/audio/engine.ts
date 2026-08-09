@@ -39,6 +39,9 @@ export interface AudioBridge {
   /** Current persisted output device id for a session ("" = system default) */
   getSessionRoutedDevice(pid: number, exe: string): Promise<string>;
   
+  /** Reset a session's per-app output route back to the system default */
+  resetSessionDevice(pid: number, exe: string): Promise<void>;
+  
   /** Start the 60 Hz meter stream */
   startStream(): Promise<void>;
   
@@ -141,6 +144,10 @@ class TauriBridge implements AudioBridge {
 
   getSessionRoutedDevice(pid: number, exe: string): Promise<string> {
     return invoke<string>("get_session_routed_device", { pid, exe });
+  }
+
+  resetSessionDevice(pid: number, exe: string): Promise<void> {
+    return invoke<void>("reset_session_device", { pid, exe });
   }
 
   startStream(): Promise<void> {

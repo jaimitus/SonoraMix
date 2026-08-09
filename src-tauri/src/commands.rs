@@ -216,6 +216,14 @@ pub async fn get_session_routed_device(
     wasapi::get_session_routed_device(pid, &exe).map_err(|e| e.to_user_message())
 }
 
+/// Removes the persisted per-app output override for an application, returning
+/// it to the system default device.
+#[tauri::command]
+pub async fn reset_session_device(pid: u32, exe: String) -> Result<(), String> {
+    wasapi::ensure_com_init();
+    wasapi::clear_session_routed_device(pid, &exe).map_err(|e| e.to_user_message())
+}
+
 /// Sets whether closing the main window minimizes to the tray (true)
 /// or fully quits the app (false).
 #[tauri::command]

@@ -34,6 +34,8 @@ interface SessionCardProps {
   onRoute?: () => void;
   /** Device this session is currently persisted-routed to ("" = system default) */
   routedDeviceId?: string;
+  /** Reset this session back to the system default output device */
+  onResetRoute?: () => void;
 }
 
 const hueOf = (pid: number): number => (pid * 137 + 20) % 360;
@@ -52,6 +54,7 @@ export default function SessionCard({
   onRouteToDevice,
   onRoute,
   routedDeviceId,
+  onResetRoute,
 }: SessionCardProps) {
   const mutedRef = useRef(session.muted);
   mutedRef.current = session.muted;
@@ -232,6 +235,19 @@ export default function SessionCard({
               <span className="truncate">
                 {renderDevices.find((d) => d.id === routedDeviceId)?.name ?? "Custom device"}
               </span>
+              {onResetRoute && (
+                <button
+                  type="button"
+                  onClick={onResetRoute}
+                  title={`Reset ${displayName} to the system default device`}
+                  aria-label={`Reset ${displayName} output to default`}
+                  className="ml-auto flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded text-ink-500 transition-colors hover:bg-ink-800 hover:text-led-red"
+                >
+                  <svg viewBox="0 0 16 16" className="h-2.5 w-2.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                    <path d="M13 8a5 5 0 1 1-1.5-3.5M13 1.5v3h-3" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              )}
             </p>
           )}
         </div>
@@ -315,6 +331,25 @@ export default function SessionCard({
                   <p className="px-2 pt-1 pb-1.5 text-[9px] font-bold uppercase tracking-widest text-ink-500">
                     Route {displayName} to…
                   </p>
+                  {onResetRoute && (
+                    <>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setRouteOpen(false);
+                          onResetRoute();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] text-ink-200 transition-colors hover:bg-ink-800 hover:text-ink-100"
+                      >
+                        <svg viewBox="0 0 16 16" className="h-3 w-3 text-led-amber" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                          <path d="M13 8a5 5 0 1 1-1.5-3.5M13 1.5v3h-3" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        Reset to system default
+                      </button>
+                      <div className="my-1 border-t border-rule/50" />
+                    </>
+                  )}
                   <div className="max-h-[210px] overflow-y-auto pr-0.5">
                     {renderDevices && renderDevices.length > 0 ? (
                       renderDevices.map((dev) => {
