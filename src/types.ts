@@ -68,6 +68,14 @@ export interface MeterFrame {
   right: number;
 }
 
+/** Master (default render endpoint) volume control state */
+export interface MasterControl {
+  /** Device volume 0..1 */
+  volume: number;
+  /** Device mute state */
+  muted: boolean;
+}
+
 /** Engine runtime mode */
 export type EngineMode = "wasapi";
 

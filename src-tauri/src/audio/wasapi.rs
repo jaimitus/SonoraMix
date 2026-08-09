@@ -21,9 +21,10 @@ use windows::Win32::Graphics::Gdi::{
     DeleteObject, GetDIBits, GetDC, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO, BITMAPINFOHEADER,
     DIB_RGB_COLORS, HBITMAP, HDC,
 };
-use windows::Win32::Media::Audio::Endpoints::IAudioMeterInformation;
+use windows::Win32::Media::Audio::Endpoints::{IAudioEndpointVolume, IAudioMeterInformation};
 use windows::Win32::Media::Audio::{
-    AudioSessionStateExpired, DEVICE_STATE_ACTIVE, DEVICE_STATE_DISABLED, eCapture, eMultimedia, eRender,
+    AudioSessionStateActive, AudioSessionStateExpired, AudioSessionStateInactive, DEVICE_STATE_ACTIVE,
+    DEVICE_STATE_DISABLED, eCapture, eMultimedia, eRender,
     IAudioSessionControl, IAudioSessionControl2, IAudioSessionEnumerator,
     IAudioSessionManager2, IMMDevice, IMMDeviceEnumerator, ISimpleAudioVolume,
     MMDeviceEnumerator, PKEY_AudioEndpoint_FormFactor,
@@ -60,6 +61,14 @@ pub struct SessionInfo {
     pub channels: u32,
     pub flow: String, // "render" | "capture"
     pub state: String, // "active" | "inactive" | "expired"
+}
+
+/// Serializable master (default render endpoint) volume control state.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MasterControl {
+    pub volume: f32,
+    pub muted: bool,
 }
 
 /// Serializable audio endpoint information.
@@ -285,10 +294,15 @@ unsafe fn build_raw_session(control: &IAudioSessionControl, self_pid: u32) -> Op
         if state == AudioSessionStateExpired {
             return None;
         }
-        let state_str = match state {
-            AudioSessionStateActive => "active",
-            AudioSessionStateInactive => "inactive",
-            _ => "expired",
+        // AudioSessionState is a newtype (`AudioSessionState(i32)`), NOT a fieldless
+        // enum — its constants cannot be used as match patterns (they would silently
+        // bind and always match). Compare with `==` instead.
+        let state_str = if state == AudioSessionStateActive {
+            "active"
+        } else if state == AudioSessionStateInactive {
+            "inactive"
+        } else {
+            "expired"
         };
 
         let volume: ISimpleAudioVolume = control.cast().ok()?;
@@ -542,6 +556,85 @@ fn form_factor_label(raw: Option<u32>) -> String {
         _ => "Audio Endpoint",
     }
     .to_string()
+}
+
+// =============================================================================
+// Master Volume (default render endpoint)
+// =============================================================================
+
+/// Activates the IAudioEndpointVolume of the current default render endpoint.
+///
+/// # Safety
+/// Caller must have an active COM apartment.
+unsafe fn default_render_endpoint_volume() -> SonoraResult<IAudioEndpointVolume> {
+    unsafe {
+        let enumerator: IMMDeviceEnumerator = match CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) {
+            Ok(e) => e,
+            Err(err) => {
+                warn!("creating device enumerator failed: {}", err);
+                return Err(SonoraError::DeviceEnumeration(err.to_string()));
+            }
+        };
+        let endpoint = enumerator
+            .GetDefaultAudioEndpoint(eRender, eMultimedia)
+            .map_err(|e| SonoraError::DeviceEnumeration(format!("no default render endpoint: {}", e)))?;
+        endpoint
+            .Activate(CLSCTX_ALL, None)
+            .map_err(|e| SonoraError::DeviceEnumeration(format!("activating endpoint volume: {}", e)))
+    }
+}
+
+/// Reads the current volume (0..1) and mute state of the default render endpoint.
+///
+/// # Safety
+/// Caller must have an active COM apartment.
+pub unsafe fn get_master_control() -> SonoraResult<MasterControl> {
+    let volume = unsafe { default_render_endpoint_volume()? };
+    let scalar = unsafe { volume.GetMasterVolumeLevelScalar() }.unwrap_or(0.0).clamp(0.0, 1.0);
+    let muted = unsafe { volume.GetMute() }.map(|b| b.as_bool()).unwrap_or(false);
+
+    Ok(MasterControl {
+        volume: scalar,
+        muted,
+    })
+}
+
+/// Sets the master volume (0..1) of the default render endpoint.
+///
+/// # Safety
+/// Caller must have an active COM apartment.
+pub unsafe fn set_master_volume(scalar: f32) -> SonoraResult<()> {
+    let volume = unsafe { default_render_endpoint_volume()? };
+    unsafe { volume.SetMasterVolumeLevelScalar(scalar.clamp(0.0, 1.0), std::ptr::null()) }
+        .map_err(|e| SonoraError::VolumeControl {
+            pid: 0,
+            err: e.to_string(),
+        })
+}
+
+/// Sets the mute state of the default render endpoint.
+///
+/// # Safety
+/// Caller must have an active COM apartment.
+pub unsafe fn set_master_mute(muted: bool) -> SonoraResult<()> {
+    let volume = unsafe { default_render_endpoint_volume()? };
+    unsafe { volume.SetMute(BOOL::from(muted), std::ptr::null()) }
+        .map_err(|e| SonoraError::MuteControl {
+            pid: 0,
+            err: e.to_string(),
+        })
+}
+
+/// Opens the Windows 11 "App volume and device preferences" page where users can
+/// route individual applications to specific output devices (the only supported
+/// per-app routing surface on modern Windows).
+pub fn open_windows_app_volume_settings() -> SonoraResult<()> {
+    std::process::Command::new("explorer.exe")
+        .arg("ms-settings:apps-volume")
+        .spawn()
+        .map_err(|e| SonoraError::Internal(format!("launching app volume settings: {}", e)))?;
+    info!("opened Windows app volume settings page");
+    Ok(())
 }
 
 // =============================================================================

@@ -59,6 +59,10 @@ pub fn run() {
             commands::get_engine_health,
             commands::minimize_to_tray,
             commands::toggle_device_enabled,
+            commands::get_master_control,
+            commands::set_master_volume,
+            commands::set_master_mute,
+            commands::open_windows_app_volume,
         ])
         .run(tauri::generate_context!())
         .expect("fatal error while running SonoraMix runtime");

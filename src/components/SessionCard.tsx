@@ -18,6 +18,8 @@ interface SessionCardProps {
   source: LevelSource;
   onVolume: (id: string, volume: number) => void;
   onMute: (id: string, muted: boolean) => void;
+  /** Optional: opens the Windows per-app output routing page (render sessions only) */
+  onRoute?: () => void;
 }
 
 const DISPLAY_NAMES: Record<string, string> = {
@@ -56,6 +58,7 @@ export default function SessionCard({
   source,
   onVolume,
   onMute,
+  onRoute,
 }: SessionCardProps) {
   const mutedRef = useRef(session.muted);
   mutedRef.current = session.muted;
@@ -194,9 +197,24 @@ export default function SessionCard({
           {session.muted ? "MUTED" : "UNMUTE"}
         </button>
 
-        <div className="flex items-center gap-1 font-mono text-[9px] text-ink-300 bg-ink-950/80 px-2 py-1 rounded border border-rule/30">
-          <span className="text-[8px] text-ink-500">dBFS</span>
-          <DbReadout source={source} muted={() => mutedRef.current} />
+        <div className="flex items-center gap-1.5">
+          {session.flow !== "capture" && onRoute && (
+            <button
+              type="button"
+              onClick={onRoute}
+              title={`Set ${displayName}'s output device in Windows… (per-app routing lives there)`}
+              aria-label={`Route ${displayName} output in Windows`}
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-ink-800/80 text-ink-300 border border-rule/50 transition-all hover:bg-ink-700 hover:text-ink-100 hover:border-signal/40"
+            >
+              <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                <path d="M2 8h12M9 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          )}
+          <div className="flex items-center gap-1 font-mono text-[9px] text-ink-300 bg-ink-950/80 px-2 py-1 rounded border border-rule/30">
+            <span className="text-[8px] text-ink-500">dBFS</span>
+            <DbReadout source={source} muted={() => mutedRef.current} />
+          </div>
         </div>
       </div>
     </article>

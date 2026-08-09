@@ -9,7 +9,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AudioDeviceInfo, AudioSessionInfo, EngineMode, MeterFrame } from "../types";
+import type { AudioDeviceInfo, AudioSessionInfo, EngineMode, MasterControl, MeterFrame } from "../types";
 
 /** Interface for audio operations */
 export interface AudioBridge {
@@ -47,7 +47,19 @@ export interface AudioBridge {
   
   /** Enable or disable an audio endpoint in Windows */
   toggleDeviceEnabled(deviceId: string, enabled: boolean): Promise<void>;
-  
+
+  /** Get master volume + mute of the default render endpoint */
+  getMasterControl(): Promise<MasterControl>;
+
+  /** Set master volume (0..1) */
+  setMasterVolume(volume: number): Promise<void>;
+
+  /** Set master mute */
+  setMasterMute(muted: boolean): Promise<void>;
+
+  /** Open the Windows per-app volume/routing settings page */
+  openWindowsAppVolume(): Promise<void>;
+
   /** Clean up resources */
   dispose(): void;
 }
@@ -114,6 +126,22 @@ class TauriBridge implements AudioBridge {
 
   toggleDeviceEnabled(deviceId: string, enabled: boolean): Promise<void> {
     return invoke<void>("toggle_device_enabled", { deviceId, enabled });
+  }
+
+  getMasterControl(): Promise<MasterControl> {
+    return invoke<MasterControl>("get_master_control");
+  }
+
+  setMasterVolume(volume: number): Promise<void> {
+    return invoke<void>("set_master_volume", { volume });
+  }
+
+  setMasterMute(muted: boolean): Promise<void> {
+    return invoke<void>("set_master_mute", { muted });
+  }
+
+  openWindowsAppVolume(): Promise<void> {
+    return invoke<void>("open_windows_app_volume");
   }
 
   onVumeter(callback: (frames: MeterFrame[]) => void): () => void {

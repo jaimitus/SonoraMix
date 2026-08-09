@@ -12,8 +12,10 @@ import type {
   EngineMode,
   LevelSample,
   LevelSource,
+  MasterControl,
   ToastItem,
 } from "./types";
+import Fader from "./components/Fader";
 import { createBridge, type AudioBridge } from "./audio/engine";
 import { checkForUpdates, currentVersion, installUpdate, isTauri, APP_VERSION } from "./updater";
 import type { Update } from "@tauri-apps/plugin-updater";
@@ -91,6 +93,11 @@ function Dashboard() {
   const [updateDismissed, setUpdateDismissed] = useState(false);
   const [appVersion, setAppVersion] = useState(APP_VERSION);
   const updateBusyRef = useRef(false);
+  const [master, setMaster] = useState<MasterControl>({ volume: 1, muted: false });
+  const masterTimerRef = useRef<number | null>(null);
+  const pendingMasterRef = useRef<number | null>(null);
+  const masterVolumeRef = useRef(1);
+  const masterMutedRef = useRef(false);
 
   const showToast = useCallback((kind: ToastItem["kind"], title: string, body?: string) => {
     const id = ++toastIdRef.current;
@@ -159,6 +166,12 @@ function Dashboard() {
   const sessionSource = useCallback((id: string): LevelSource => () => levelsRef.current.get(id) ?? ZERO_LEVEL, []);
   const masterSource = useCallback<LevelSource>(() => masterRef.current, []);
 
+  // Keep the meter-scaling refs in sync with the master control state.
+  useEffect(() => {
+    masterVolumeRef.current = master.volume;
+    masterMutedRef.current = master.muted;
+  }, [master]);
+
   useEffect(() => {
     let disposed = false;
     const cleanupFns: Array<() => void> = [];
@@ -191,10 +204,14 @@ function Dashboard() {
             sumR += f.right * f.right;
           }
           const n = Math.max(1, frames.length);
+          // Scale the master bus meter by the current master volume/mute so the
+          // strip tracks the fader (session meters are pre-master, so only this
+          // meter can show the actual output level).
+          const masterGain = masterMutedRef.current ? 0 : masterVolumeRef.current;
           masterRef.current = {
-            peak: Math.min(1, Math.sqrt(sumSq / n) * 1.12),
-            left: Math.min(1, Math.sqrt(sumL / n) * 1.12),
-            right: Math.min(1, Math.sqrt(sumR / n) * 1.12),
+            peak: Math.min(1, Math.sqrt(sumSq / n) * 1.12 * masterGain),
+            left: Math.min(1, Math.sqrt(sumL / n) * 1.12 * masterGain),
+            right: Math.min(1, Math.sqrt(sumR / n) * 1.12 * masterGain),
             ts: now,
           };
           frameCountRef.current++;
@@ -217,6 +234,10 @@ function Dashboard() {
       }
     })();
 
+    b.getMasterControl()
+      .then((m) => { if (!disposed) setMaster(m); })
+      .catch(() => {});
+
     const statsIv = window.setInterval(() => {
       setStats((prev) => {
         const frames = frameCountRef.current;
@@ -231,6 +252,7 @@ function Dashboard() {
       const b2 = bridgeRef.current;
       if (b2) {
         b2.getSessions().then((s) => { if (!disposed) setSessions(s); }).catch(() => {});
+        b2.getMasterControl().then((m) => { if (!disposed) setMaster(m); }).catch(() => {});
       }
     }, 3000);
 
@@ -239,6 +261,7 @@ function Dashboard() {
       window.clearInterval(statsIv);
       window.clearInterval(pollIv);
       if (flushTimerRef.current !== null) window.clearTimeout(flushTimerRef.current);
+      if (masterTimerRef.current !== null) window.clearTimeout(masterTimerRef.current);
       cleanupFns.forEach((fn) => fn());
       bridgeRef.current?.dispose();
       bridgeRef.current = null;
@@ -323,6 +346,39 @@ function Dashboard() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [rescan, bootDone]);
+
+  const flushMasterVolume = useCallback(() => {
+    const v = pendingMasterRef.current;
+    pendingMasterRef.current = null;
+    if (v !== null) {
+      bridgeRef.current?.setMasterVolume(v).catch((e) => showToast("error", "Master Volume Error", String(e)));
+    }
+  }, [showToast]);
+
+  const handleMasterVolume = useCallback(
+    (volume: number) => {
+      setMaster((prev) => ({ ...prev, volume }));
+      pendingMasterRef.current = volume;
+      if (masterTimerRef.current === null) {
+        masterTimerRef.current = window.setTimeout(() => {
+          masterTimerRef.current = null;
+          flushMasterVolume();
+        }, 45);
+      }
+    },
+    [flushMasterVolume],
+  );
+
+  const handleMasterMute = useCallback((muted: boolean) => {
+    setMaster((prev) => ({ ...prev, muted }));
+    bridgeRef.current?.setMasterMute(muted).catch((e) => showToast("error", "Master Mute Error", String(e)));
+  }, [showToast]);
+
+  const handleOpenWindowsRouting = useCallback(() => {
+    bridgeRef.current?.openWindowsAppVolume()
+      .then(() => showToast("info", "Windows App Volume", "Pick the output device for this app in the Windows page."))
+      .catch((e) => showToast("error", "Open Failed", String(e)));
+  }, [showToast]);
 
   const handleToggleDevice = useCallback(
     (deviceId: string, enabled: boolean) => {
@@ -544,6 +600,7 @@ function Dashboard() {
                             source={sessionSource(s.id)}
                             onVolume={handleVolume}
                             onMute={handleMute}
+                            onRoute={handleOpenWindowsRouting}
                           />
                         ))}
                         <MasterStrip
@@ -551,6 +608,10 @@ function Dashboard() {
                           source={masterSource}
                           deviceName={deviceName}
                           sessionsCount={sessions.length}
+                          volume={master?.volume ?? 1}
+                          muted={master?.muted ?? false}
+                          onVolume={handleMasterVolume}
+                          onMute={handleMasterMute}
                         />
                       </div>
                     )}
@@ -593,23 +654,30 @@ function Dashboard() {
   );
 }
 
-function MasterStrip({ index, source, deviceName, sessionsCount }: {
+function MasterStrip({ index, source, deviceName, sessionsCount, volume, muted, onVolume, onMute }: {
   index: number;
   source: LevelSource;
   deviceName: string;
   sessionsCount: number;
+  volume: number;
+  muted: boolean;
+  onVolume: (volume: number) => void;
+  onMute: (muted: boolean) => void;
 }) {
+  const mutedRef = useRef(muted);
+  mutedRef.current = muted;
+
   return (
     <article
-      className="relative flex flex-col p-4 rounded-xl bg-panel-2/60 border border-signal/25 hover:border-signal/40 transition-[border-color,box-shadow] duration-200"
+      className="group relative flex flex-col w-[240px] p-3.5 rounded-xl bg-panel-2/70 border border-signal/25 hover:border-signal/40 transition-[border-color,box-shadow] duration-200"
       style={{
-        boxShadow: `inset 0 1px 0 rgba(255,121,64,0.06), 0 8px 20px rgba(0,0,0,0.25)`,
+        boxShadow: "inset 0 1px 0 rgba(255,121,64,0.06), 0 8px 20px rgba(0,0,0,0.25)",
         animationDelay: `${Math.min(index, 12) * 45}ms`,
       }}
       aria-label="Master output bus"
     >
-      <div className="h-px w-full bg-gradient-to-r from-transparent via-signal/60 to-transparent" aria-hidden="true" />
-      <div className="mt-1 flex items-center gap-2.5">
+      {/* Top Header: Master icon + device name + BUS badge */}
+      <div className="mb-3 flex items-center gap-2.5">
         <div className="flex h-8 w-8 flex-none items-center justify-center rounded-md border border-signal/25 bg-signal/8 shadow-[0_0_10px_rgba(255,121,64,0.2)]">
           <svg viewBox="0 0 24 24" className="h-4 w-4 text-signal" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="7.5" />
@@ -617,34 +685,75 @@ function MasterStrip({ index, source, deviceName, sessionsCount }: {
             <path d="M4 12h2M20 12h2M12 4v2M12 20v2" strokeLinecap="round" opacity="0.45" />
           </svg>
         </div>
-        <div>
-          <h3 className="font-medium text-[13px] tracking-tight text-signal">MASTER OUT</h3>
-          <p className="typo-monoline text-[10px] text-ink-300 truncate max-w-[200px]" title={deviceName}>
-            {deviceName || "awaiting endpoint…"}
-          </p>
-        </div>
-        <div className="flex-1" />
-        <span className="typo-monoline text-[10px] text-ink-500">
-          {sessionsCount} session{sessionsCount !== 1 ? "s" : ""}
-        </span>
-      </div>
-
-      <div className="mt-3 flex min-h-[140px] flex-1 flex-col">
-        <span className="mb-1.5 typo-monoline text-[9px] text-ink-500 tracking-widest">MONO SUM</span>
-        <div className="relative flex-1">
-          <VumeterCanvas source={source} channels={2} className="h-full w-full" />
-          <div className="absolute left-0 top-0 flex w-full justify-between px-1" aria-hidden="true">
-            <span className="typo-monoline text-[7px] text-ink-500/60">0 dBFS</span>
-            <span className="typo-monoline text-[7px] text-ink-500/60">−60 dBFS</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-1">
+            <h3 className="truncate font-semibold text-[12px] tracking-tight text-signal">MASTER OUT</h3>
+            <span className="rounded px-1 py-0.2 text-[8px] font-bold tracking-wider uppercase text-signal bg-signal/15 border border-signal/30">
+              BUS
+            </span>
+          </div>
+          <div className="flex items-center justify-between gap-1">
+            <p className="truncate font-mono text-[9px] text-ink-500" title={deviceName}>
+              {deviceName || "awaiting endpoint…"}
+            </p>
+            <span className="shrink-0 font-mono text-[8px] text-ink-500">{sessionsCount} ch</span>
           </div>
         </div>
       </div>
 
-      <div className="mt-3 flex items-center justify-end">
-        <div className="flex items-baseline gap-1.5">
-          <span className="typo-monoline text-[9px] text-ink-500 uppercase tracking-widest">Peak</span>
-          <DbReadout source={source} muted={() => false} className="typo-number text-[12px] text-ink-100" />
-          <span className="typo-monoline text-[9px] text-ink-500">dBFS</span>
+      {/* Main Console Strip Module: Fader | dB Scale | Meter (mirrors SessionCard) */}
+      <div className="relative flex min-h-[165px] flex-1 items-stretch gap-2 px-0.5 py-1 bg-ink-950/60 rounded-lg border border-rule/40">
+        {/* Fader Column */}
+        <div className="flex w-[72px] flex-none flex-col items-center justify-between py-1">
+          <Fader value={volume} onChange={onVolume} showValue={false} />
+          <span className="mt-1 font-mono text-[9px] font-bold text-signal tracking-wider">
+            {Math.round(volume * 100)}%
+          </span>
+        </div>
+
+        {/* dB Scale Markings */}
+        <div className="flex w-[26px] flex-none flex-col justify-between items-center py-2.5 font-mono text-[7px] text-ink-500 select-none border-x border-rule/30">
+          <span>0dB</span>
+          <span>−6</span>
+          <span>−12</span>
+          <span>−30</span>
+          <span>−60</span>
+        </div>
+
+        {/* Meter Column */}
+        <div className="relative flex-1 min-w-0">
+          <div className="meter-face h-full">
+            <VumeterCanvas
+              source={source}
+              channels={2}
+              className={`h-full w-full block transition-opacity duration-200 ${
+                muted ? "opacity-25" : "opacity-100"
+              }`}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom Footer: Mute + live dBFS readout */}
+      <div className="mt-2.5 flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => onMute(!muted)}
+          aria-pressed={muted}
+          title={muted ? "Unmute master output" : "Mute master output"}
+          className={`inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2.5 text-[10px] font-bold tracking-wider transition-all ${
+            muted
+              ? "btn-mute-active"
+              : "bg-ink-800/80 text-ink-300 border border-rule/50 hover:bg-ink-700 hover:text-ink-100"
+          }`}
+        >
+          <span className={`led ${muted ? "led-red" : "led-green"}`} style={{ width: "5px", height: "5px" }} />
+          {muted ? "MUTED" : "UNMUTE"}
+        </button>
+
+        <div className="flex items-center gap-1 font-mono text-[9px] text-ink-300 bg-ink-950/80 px-2 py-1 rounded border border-rule/30">
+          <span className="text-[8px] text-ink-500">dBFS</span>
+          <DbReadout source={source} muted={() => mutedRef.current} />
         </div>
       </div>
     </article>

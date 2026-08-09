@@ -158,3 +158,30 @@ pub async fn toggle_device_enabled(
     wasapi::toggle_device_enabled(&device_id, enabled)
         .map_err(|e| e.to_user_message())
 }
+
+/// Reads the master volume and mute state of the default render endpoint.
+#[tauri::command]
+pub async fn get_master_control() -> Result<wasapi::MasterControl, String> {
+    wasapi::ensure_com_init();
+    unsafe { wasapi::get_master_control() }.map_err(|e| e.to_user_message())
+}
+
+/// Sets the master volume (0..1) of the default render endpoint.
+#[tauri::command]
+pub async fn set_master_volume(volume: f32) -> Result<(), String> {
+    wasapi::ensure_com_init();
+    unsafe { wasapi::set_master_volume(volume) }.map_err(|e| e.to_user_message())
+}
+
+/// Sets the mute state of the default render endpoint.
+#[tauri::command]
+pub async fn set_master_mute(muted: bool) -> Result<(), String> {
+    wasapi::ensure_com_init();
+    unsafe { wasapi::set_master_mute(muted) }.map_err(|e| e.to_user_message())
+}
+
+/// Opens the Windows "App volume and device preferences" page for per-app routing.
+#[tauri::command]
+pub fn open_windows_app_volume() -> Result<(), String> {
+    wasapi::open_windows_app_volume_settings().map_err(|e| e.to_user_message())
+}
