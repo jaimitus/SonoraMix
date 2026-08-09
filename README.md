@@ -1,6 +1,6 @@
 # 🎛️ SonoraMix — Professional Windows WASAPI Audio Session Console
 
-[![Release](https://img.shields.io/badge/Release-v1.0.2-ff7940?style=for-the-badge&logo=github)](https://github.com/jaimitus/SonoraMix/releases/tag/v1.0.2)
+[![Release](https://img.shields.io/badge/Release-v1.1.0-ff7940?style=for-the-badge&logo=github)](https://github.com/jaimitus/SonoraMix/releases/tag/v1.1.0)
 [![License](https://img.shields.io/badge/License-MIT-33d1b8?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-0078d4?style=for-the-badge&logo=windows)](https://github.com/jaimitus/SonoraMix)
 [![WASAPI](https://img.shields.io/badge/Engine-Native%20WASAPI-3fe082?style=for-the-badge)](https://github.com/jaimitus/SonoraMix)
@@ -23,9 +23,14 @@
 - **📐 Fixed 240px Studio Channel Strips**: Fixed-width physical module cards (GoXLR / SSL style) with vertical fader sliders, center dB scale markings, and dual stereo (L/R) meter ladders. **Zero layout distortion when resizing the window**.
 - **🔊 Separate Playback & Mic Routing**: Dedicated header controls to switch default system output devices (Speakers / Headphones) and recording devices (Microphones) independently.
 - **🔄 Instant Session Rescan & Hotkeys**: Press <kbd>R</kbd> or click the interactive `🔄 RESCAN` button to re-enumerate Windows audio sessions dynamically.
-- **🚀 Automatic Updates (v1.0.2)**: SonoraMix checks GitHub Releases on startup and notifies you when a new version is available. Download & install with one click from the **Updates** button in the header — no need to visit the Releases page manually.
+- **🚀 Automatic Updates (v1.0.2+)**: SonoraMix checks GitHub Releases on startup and notifies you when a new version is available. Download & install with one click from the **Updates** button in the header — no need to visit the Releases page manually.
 - **🔊 MASTER OUT Bus Control (v1.0.2)**: A dedicated master strip with its own volume fader, mute and live metering for the default output device — the first thing any mixer expects.
-- **🎯 Per-App Output Routing Helper (v1.0.2)**: Every output channel has a route button that opens the native Windows per-app volume & device preferences page, so you can send individual apps to specific devices (headset, speakers…).
+- **🎨 Accent Themes & Settings Drawer (v1.1.0)**: Six color themes (Sunset, Emerald, Ocean, Blossom, Violet, Gold) plus a full settings panel — minimize-to-tray, start with Windows, launch minimized and configurable **global shortcuts** (record any combination).
+- **🔍 Search, Pin & Rename Channels (v1.1.0)**: Filter channels with <kbd>Ctrl+F</kbd>, pin favorites to the top and double-click any name to rename it — all persisted across restarts.
+- **📟 Device Bus Meters + Peak History (v1.1.0)**: Live hardware-level meters for the default output **and** input device (the mic meter works even when no app is using it), each with a click-to-reset peak-hold.
+- **⚡ Instant WASAPI Notifications (v1.1.0)**: `IAudioSessionNotification` + `IMMNotificationClient` replace polling — sessions and devices appear/disappear the moment they change.
+- **🎯 In-App Per-App Routing (v1.1.0)**: Route any app to any output device **without leaving SonoraMix** (the same persisted mechanism the Windows settings page uses), see the current device per channel, and reset back to the system default with one click.
+- **⌨️ Global Hotkeys (v1.1.0)**: Mute the system mic from anywhere with <kbd>Ctrl+Shift+M</kbd> and show/hide the console with <kbd>Alt+Shift+S</kbd> — both fully configurable in Settings.
 - **⚡ System Tray Integration**: Minimizes silently to the Windows System Tray for unobtrusive background operation.
 
 ---
@@ -34,11 +39,13 @@
 
 ```
 +-----------------------------------------------------------------------------------+
-|  SonoraMix v1.0.2 — STUDIO MIXING CONSOLE                                          |
-|  [🔊 Output: Realtek Speakers ]   [🎙️ Mic: USB Microphone ]   [WASAPI LIVE] [Tray] |
+|  SonoraMix v1.1.0 — STUDIO MIXING CONSOLE                                          |
+|  [🔊 Output: Realtek Speakers ]   [🎙️ Mic: USB Microphone ]   [WASAPI LIVE] [⚙️]  |
 +-----------------------------------------------------------------------------------+
 |  [ 🎛️ DUAL CONSOLE ]            [ 🔊 OUTPUTS (4) ]            [ 🎙️ INPUTS (2) ]  |
+|  [ 🔍 Search channels… (Ctrl+F) ]                                                 |
 +-----------------------------------------------------------------------------------+
+|  📟 DEVICE BUS METERS — [ Output ▮▮▮▮▮ ] [ Input ▮▮▮▮▮ ] (live hardware level)   |
 |                                                                                   |
 |  🎙️ INPUT CONSOLE — MICROPHONES & VOICE CAPTURE                                   |
 |  +--------------------+  +--------------------+                                   |
@@ -49,22 +56,23 @@
 |  🔊 OUTPUT CONSOLE — APPLICATION PLAYBACK & MUSIC                                 |
 |  +--------------------+  +--------------------+  +--------------------+           |
 |  | Spotify            |  | Counter-Strike 2   |  | MASTER BUS         |           |
-|  | [Fader] [dB] [VU]  |  | [Fader] [dB] [VU]  |  | [Fader] [dB] [VU]  |           |
+|  | → Headphones (USB) |  | → System default   |  | [Fader] [dB] [VU]  |           |
+|  | [Fader] [dB] [VU]  |  | [Fader] [dB] [VU]  |  |                    |           |
 |  +--------------------+  +--------------------+  +--------------------+           |
 +-----------------------------------------------------------------------------------+
 ```
 
 ---
 
-## 📦 Downloads & Releases (v1.0.2)
+## 📦 Downloads & Releases (v1.1.0)
 
-Grab the latest pre-compiled release for Windows 10/11 x64 on the [**Releases Page**](https://github.com/jaimitus/SonoraMix/releases/tag/v1.0.2):
+Grab the latest pre-compiled release for Windows 10/11 x64 on the [**Releases Page**](https://github.com/jaimitus/SonoraMix/releases/tag/v1.1.0):
 
 | Package | File | Size | Description |
 | :--- | :--- | :--- | :--- |
-| 🚀 **Standalone Portable** | [`sonoramix.exe`](https://github.com/jaimitus/SonoraMix/releases) | ~4.5 MB | Single executable, zero installation required. |
-| 📦 **NSIS Setup Installer** | [`SonoraMix_1.0.2_x64-setup.exe`](https://github.com/jaimitus/SonoraMix/releases) | ~1.3 MB | Standard Windows installer with Start Menu & Desktop shortcuts. |
-| 🛡️ **MSI Package** | [`SonoraMix_1.0.2_x64_en-US.msi`](https://github.com/jaimitus/SonoraMix/releases) | ~1.8 MB | Windows Installer package for enterprise deployment. |
+| 🚀 **Standalone Portable** | [`sonoramix.exe`](https://github.com/jaimitus/SonoraMix/releases) | ~6 MB | Single executable, zero installation required. |
+| 📦 **NSIS Setup Installer** | [`SonoraMix_1.1.0_x64-setup.exe`](https://github.com/jaimitus/SonoraMix/releases) | ~2 MB | Standard Windows installer with Start Menu & Desktop shortcuts. |
+| 🛡️ **MSI Package** | [`SonoraMix_1.1.0_x64_en-US.msi`](https://github.com/jaimitus/SonoraMix/releases) | ~2.7 MB | Windows Installer package for enterprise deployment. |
 
 > 💡 **Automatic updates require an installed package (NSIS or MSI).** The portable `sonoramix.exe` does not self-update — download the new portable from the Releases page instead.
 
@@ -106,8 +114,8 @@ npm run tauri build
 
 Binary outputs will be generated in:
 - Portable: `src-tauri/target/release/sonoramix.exe`
-- NSIS Setup: `src-tauri/target/release/bundle/nsis/SonoraMix_1.0.2_x64-setup.exe`
-- MSI: `src-tauri/target/release/bundle/msi/SonoraMix_1.0.2_x64_en-US.msi`
+- NSIS Setup: `src-tauri/target/release/bundle/nsis/SonoraMix_1.1.0_x64-setup.exe`
+- MSI: `src-tauri/target/release/bundle/msi/SonoraMix_1.1.0_x64_en-US.msi`
 
 ### Publishing a new update (maintainers)
 1. Bump the version in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `package.json`.
