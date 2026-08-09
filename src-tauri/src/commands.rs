@@ -204,6 +204,18 @@ pub async fn route_session_device(
     wasapi::route_session_to_endpoint(pid, &exe, &device_id).map_err(|e| e.to_user_message())
 }
 
+/// Returns the raw output-device id the given app is currently persisted-routed
+/// to (empty = follows the system default). Lets the UI show, per channel,
+/// which device an app is actually playing through.
+#[tauri::command]
+pub async fn get_session_routed_device(
+    pid: u32,
+    exe: String,
+) -> Result<String, String> {
+    wasapi::ensure_com_init();
+    wasapi::get_session_routed_device(pid, &exe).map_err(|e| e.to_user_message())
+}
+
 /// Sets whether closing the main window minimizes to the tray (true)
 /// or fully quits the app (false).
 #[tauri::command]

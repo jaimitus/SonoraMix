@@ -751,7 +751,6 @@ const IID_AUDIO_POLICY_CONFIG_DOWNLEVEL: GUID = GUID::from_u128(0x2a59116d_6c4f_
 /// (Rendering sessions are the only routable ones on modern Windows, so the
 /// capture suffix is kept for reference but not referenced at runtime.)
 const DEVINTERFACE_AUDIO_RENDER: &str = "#{e6327cad-dcec-4949-ae8a-991e976a79d2}";
-#[allow(dead_code)]
 const DEVINTERFACE_AUDIO_CAPTURE: &str = "#{2eef81be-33fa-4800-9670-1cd474972c3f}";
 
 // `RoGetActivationFactory` (api-ms-win-core-winrt-l1-1-0.dll). Declared here
@@ -770,7 +769,8 @@ unsafe extern "system" {
 /// Layout (matching EarTrumpet's interface declaration):
 ///   IUnknown (3) + IInspectable GetIids/GetRuntimeClassName/GetTrustLevel (3)
 ///   + 19 volume-group/chat methods (never called) + SetPersistedDefaultAudioEndpoint
-/// `SetPersistedDefaultAudioEndpoint` therefore sits at slot 25.
+///   + GetPersistedDefaultAudioEndpoint + ClearAllPersistedApplicationDefaultEndpoints
+/// `SetPersistedDefaultAudioEndpoint` therefore sits at slot 25, the getter at 26.
 #[repr(C)]
 #[allow(non_snake_case)]
 struct AudioPolicyConfigVtbl {
@@ -782,6 +782,9 @@ struct AudioPolicyConfigVtbl {
     /// Slot 25: `HRESULT SetPersistedDefaultAudioEndpoint(UINT32 processId, EDataFlow flow, ERole role, HSTRING deviceId)`
     SetPersistedDefaultAudioEndpoint:
         unsafe extern "system" fn(*mut c_void, u32, i32, i32, *const c_void) -> HRESULT,
+    /// Slot 26: `HRESULT GetPersistedDefaultAudioEndpoint(UINT32 processId, EDataFlow flow, ERole role, HSTRING* deviceId)`
+    GetPersistedDefaultAudioEndpoint:
+        unsafe extern "system" fn(*mut c_void, u32, i32, i32, *mut *mut c_void) -> HRESULT,
 }
 
 struct AudioPolicyConfig {
@@ -846,6 +849,35 @@ impl AudioPolicyConfig {
             }
         }
         Ok(())
+    }
+
+    /// Slot 26 call: returns the raw SWD endpoint id currently persisted for
+    /// `process_id` in the given role, or an empty string when the process has
+    /// no override (i.e. it follows the system default device).
+    unsafe fn get_persisted_default_endpoint(
+        &self,
+        process_id: u32,
+        role: i32,
+    ) -> SonoraResult<String> {
+        unsafe {
+            let vtbl = *(self.raw as *const *const AudioPolicyConfigVtbl);
+            let mut raw: *mut c_void = std::ptr::null_mut();
+            let hr = ((*vtbl).GetPersistedDefaultAudioEndpoint)(
+                self.raw,
+                process_id,
+                0, // EDataFlow.eRender
+                role,
+                &mut raw,
+            );
+            if hr.is_err() || raw.is_null() {
+                // E_INVALIDARG / no persisted route → follows the system default.
+                return Ok(String::new());
+            }
+            // The callee allocates an HSTRING the caller owns; HSTRING's Drop
+            // calls WindowsDeleteString (the correct release path).
+            let hstring: HSTRING = core::mem::transmute(raw);
+            Ok(hstring.to_string_lossy())
+        }
     }
 }
 
@@ -950,6 +982,41 @@ pub fn route_session_to_endpoint(
 
     info!("routed {} (pid {}) to endpoint {}", exe_path, pid, device_id);
     Ok(())
+}
+
+/// Unpacks a persisted SWD endpoint id (e.g.
+/// `\\?\SWD#MMDEVAPI#{0.0.0.00000000}.{guid}#{e6327cad-...}`) back to the raw
+/// MMDevice id the rest of SonoraMix uses — the inverse of the packing done in
+/// `route_session_to_endpoint` (EarTrumpet's `UnpackDeviceId`).
+fn unpack_endpoint_id(full_id: &str) -> String {
+    const TOKEN: &str = r"\\?\SWD#MMDEVAPI#";
+    let stripped = full_id.strip_prefix(TOKEN).unwrap_or(full_id);
+    stripped
+        .strip_suffix(DEVINTERFACE_AUDIO_RENDER)
+        .or_else(|| stripped.strip_suffix(DEVINTERFACE_AUDIO_CAPTURE))
+        .unwrap_or(stripped)
+        .to_string()
+}
+
+/// Returns the raw output-device id the given app is currently persisted-routed
+/// to (empty string = follows the system default device). `expected_exe` guards
+/// against pid reuse, mirroring [`route_session_to_endpoint`].
+pub fn get_session_routed_device(pid: u32, expected_exe: &str) -> SonoraResult<String> {
+    ensure_com_init();
+
+    let exe_path = process_image_path(pid)
+        .map_err(|e| SonoraError::Routing(format!("resolving process {}: {}", pid, e)))?;
+    let exe = exe_path
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or_default();
+    if !exe.eq_ignore_ascii_case(expected_exe) {
+        return Ok(String::new()); // pid recycled — no reliable route info
+    }
+
+    let factory = AudioPolicyConfig::activate()?;
+    let full = unsafe { factory.get_persisted_default_endpoint(pid, 1) }?; // eMultimedia
+    Ok(unpack_endpoint_id(&full))
 }
 
 // =============================================================================

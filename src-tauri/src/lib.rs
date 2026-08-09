@@ -88,6 +88,7 @@ pub fn run() {
             commands::set_master_mute,
             commands::open_windows_app_volume,
             commands::route_session_device,
+            commands::get_session_routed_device,
             commands::set_close_behavior,
             commands::toggle_global_mic_mute,
             commands::toggle_window_visibility,

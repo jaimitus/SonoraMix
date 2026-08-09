@@ -32,6 +32,8 @@ interface SessionCardProps {
   onRouteToDevice?: (deviceId: string) => void;
   /** Optional fallback: opens the Windows per-app output routing page */
   onRoute?: () => void;
+  /** Device this session is currently persisted-routed to ("" = system default) */
+  routedDeviceId?: string;
 }
 
 const hueOf = (pid: number): number => (pid * 137 + 20) % 360;
@@ -49,6 +51,7 @@ export default function SessionCard({
   renderDevices,
   onRouteToDevice,
   onRoute,
+  routedDeviceId,
 }: SessionCardProps) {
   const mutedRef = useRef(session.muted);
   mutedRef.current = session.muted;
@@ -217,6 +220,20 @@ export default function SessionCard({
           <p className="truncate font-mono text-[9px] text-ink-500">
             {session.exe} · PID {pid}
           </p>
+          {/* Current output device for this app (in-app per-app routing). */}
+          {session.flow === "render" && renderDevices && routedDeviceId && (
+            <p
+              className="mt-0.5 flex items-center gap-1 truncate font-mono text-[8px] text-signal/90"
+              title={`Output device: ${renderDevices.find((d) => d.id === routedDeviceId)?.name ?? routedDeviceId}`}
+            >
+              <svg viewBox="0 0 16 16" className="h-2.5 w-2.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                <path d="M2 8h12M9 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span className="truncate">
+                {renderDevices.find((d) => d.id === routedDeviceId)?.name ?? "Custom device"}
+              </span>
+            </p>
+          )}
         </div>
       </div>
 
@@ -300,33 +317,44 @@ export default function SessionCard({
                   </p>
                   <div className="max-h-[210px] overflow-y-auto pr-0.5">
                     {renderDevices && renderDevices.length > 0 ? (
-                      renderDevices.map((dev) => (
-                        <button
-                          key={dev.id}
-                          type="button"
-                          role="menuitem"
-                          disabled={!dev.enabled}
-                          onClick={() => {
-                            setRouteOpen(false);
-                            onRouteToDevice?.(dev.id);
-                          }}
-                          title={dev.enabled ? dev.name : `${dev.name} (disabled — enable it first)`}
-                          className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
-                            dev.enabled
-                              ? "text-ink-200 hover:bg-ink-800 hover:text-ink-100"
-                              : "cursor-not-allowed text-ink-500 opacity-60"
-                          }`}
-                        >
-                          <span
-                            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                              dev.enabled ? "bg-led-green" : "bg-led-red"
+                      renderDevices.map((dev) => {
+                        const isCurrent = routedDeviceId === dev.id;
+                        return (
+                          <button
+                            key={dev.id}
+                            type="button"
+                            role="menuitem"
+                            disabled={!dev.enabled}
+                            onClick={() => {
+                              setRouteOpen(false);
+                              onRouteToDevice?.(dev.id);
+                            }}
+                            title={dev.enabled ? dev.name : `${dev.name} (disabled — enable it first)`}
+                            aria-current={isCurrent || undefined}
+                            className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
+                              dev.enabled
+                                ? isCurrent
+                                  ? "bg-signal/10 text-signal"
+                                  : "text-ink-200 hover:bg-ink-800 hover:text-ink-100"
+                                : "cursor-not-allowed text-ink-500 opacity-60"
                             }`}
-                            aria-hidden="true"
-                          />
-                          <span className="min-w-0 flex-1 truncate">{dev.name}</span>
-                          <span className="shrink-0 text-[8px] text-ink-500">{dev.formFactor}</span>
-                        </button>
-                      ))
+                          >
+                            <span
+                              className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                                dev.enabled ? "bg-led-green" : "bg-led-red"
+                              }`}
+                              aria-hidden="true"
+                            />
+                            <span className="min-w-0 flex-1 truncate">{dev.name}</span>
+                            {isCurrent && (
+                              <span className="shrink-0 rounded bg-signal/20 px-1 py-px text-[7px] font-bold uppercase tracking-wider text-signal">
+                                Now
+                              </span>
+                            )}
+                            <span className="shrink-0 text-[8px] text-ink-500">{dev.formFactor}</span>
+                          </button>
+                        );
+                      })
                     ) : (
                       <p className="px-2 py-1.5 text-[10px] text-ink-500">No output devices found</p>
                     )}

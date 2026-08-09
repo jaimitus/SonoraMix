@@ -36,6 +36,9 @@ export interface AudioBridge {
   /** Route a specific app session (all its processes) to an output device, in-app */
   routeSessionDevice(pid: number, exe: string, deviceId: string): Promise<void>;
   
+  /** Current persisted output device id for a session ("" = system default) */
+  getSessionRoutedDevice(pid: number, exe: string): Promise<string>;
+  
   /** Start the 60 Hz meter stream */
   startStream(): Promise<void>;
   
@@ -134,6 +137,10 @@ class TauriBridge implements AudioBridge {
 
   routeSessionDevice(pid: number, exe: string, deviceId: string): Promise<void> {
     return invoke<void>("route_session_device", { pid, exe, deviceId });
+  }
+
+  getSessionRoutedDevice(pid: number, exe: string): Promise<string> {
+    return invoke<string>("get_session_routed_device", { pid, exe });
   }
 
   startStream(): Promise<void> {

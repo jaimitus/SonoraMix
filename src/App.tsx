@@ -112,6 +112,12 @@ function Dashboard() {
 
   const [persisted, setPersisted] = useState<PersistedState>(() => loadState());
   const settingsRef = useRef(persisted.settings);
+  // Per-session persisted output device id ("" = follows system default).
+  // Keyed by session id; refreshed when the session set changes or after a route.
+  const [routedDevices, setRoutedDevices] = useState<Record<string, string>>({});
+  const routedFetchKeyRef = useRef("");
+  const routedFetchAtRef = useRef(0);
+  const routedFetchIdRef = useRef(0);
   settingsRef.current = persisted.settings;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -123,6 +129,45 @@ function Dashboard() {
     const id = ++toastIdRef.current;
     setToasts((prev) => [...prev.slice(-3), { id, kind, title, body }]);
     window.setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4500);
+  }, []);
+
+  // Refresh the persisted route of every render session (in-app per-app routing).
+  // Debounced + only when the set of session ids actually changed, so event
+  // storms (60 Hz meter / volume drags) don't trigger N IPC calls per frame.
+  const refreshRoutedDevices = useCallback((list: AudioSessionInfo[]) => {
+    const b = bridgeRef.current;
+    if (!b) return;
+    const render = list.filter((s) => s.flow === "render");
+    if (render.length === 0) {
+      setRoutedDevices({});
+      return;
+    }
+    const key = render.map((s) => s.id).sort().join("|");
+    const now = Date.now();
+    if (key === routedFetchKeyRef.current && now - routedFetchAtRef.current < 5000) return;
+    routedFetchKeyRef.current = key;
+    routedFetchAtRef.current = now;
+    const fetchId = ++routedFetchIdRef.current;
+    Promise.all(
+      render.map((s) =>
+        b
+          .getSessionRoutedDevice(s.pid, s.exe)
+          .then((deviceId) => [s.id, deviceId] as const)
+          .catch(() => [s.id, ""] as const),
+      ),
+    ).then((pairs) => {
+      // Drop stale responses: a fetch started before a route action must not
+      // clobber the freshly-routed value applied by handleRouteSession.
+      if (fetchId !== routedFetchIdRef.current) return;
+      setRoutedDevices((prev) => {
+        const next = { ...prev };
+        pairs.forEach(([id, deviceId]) => {
+          if (deviceId) next[id] = deviceId;
+          else delete next[id];
+        });
+        return next;
+      });
+    });
   }, []);
 
   const handleCheckUpdates = useCallback(
@@ -443,7 +488,7 @@ function Dashboard() {
 
       cleanupFns.push(
         bridge.onSessionsChanged(() => {
-          bridge.getSessions().then((s) => { if (!disposed) setSessions(s); }).catch(() => {});
+          bridge.getSessions().then((s) => { if (!disposed) { setSessions(s); refreshRoutedDevices(s); } }).catch(() => {});
         })
       );
 
@@ -477,7 +522,10 @@ function Dashboard() {
     (async () => {
       try {
         const data = await b.init();
-        if (!disposed) attach(b, data);
+        if (!disposed) {
+          attach(b, data);
+          refreshRoutedDevices(data.sessions);
+        }
       } catch (e) {
         showToast("error", "Initialization Error", String(e));
       }
@@ -663,7 +711,11 @@ function Dashboard() {
       const devName = devices.find((d) => d.id === deviceId)?.name ?? deviceId;
       bridgeRef.current
         ?.routeSessionDevice(session.pid, session.exe, deviceId)
-        .then(() => showToast("ok", "App Routed", `${getDisplayName(session.exe)} → ${devName}`))
+        .then(() => {
+          showToast("ok", "App Routed", `${getDisplayName(session.exe)} → ${devName}`);
+          // Refresh so the channel shows its new device immediately.
+          setRoutedDevices((prev) => ({ ...prev, [session.id]: deviceId }));
+        })
         .catch((e) => showToast("error", "Routing Failed", String(e)));
     },
     [devices, showToast],
@@ -989,6 +1041,7 @@ function Dashboard() {
                             renderDevices={devices.filter((d) => d.flow !== "capture")}
                             onRouteToDevice={(deviceId) => handleRouteSession(s, deviceId)}
                             onRoute={handleOpenWindowsRouting}
+                            routedDeviceId={routedDevices[s.id]}
                           />
                         ))}
                         <MasterStrip
