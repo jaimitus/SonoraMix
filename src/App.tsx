@@ -447,6 +447,29 @@ function Dashboard() {
         })
       );
 
+      // WASAPI IMMNotificationClient fires this when endpoints are added/removed/
+      // disabled or the default device changes — refresh devices instantly (no
+      // polling), re-derive the default out/in selection, and resync sessions
+      // since a device swap invalidates which sessions are visible.
+      cleanupFns.push(
+        bridge.onDevicesChanged(() => {
+          if (disposed) return;
+          bridge
+            .getDevices()
+            .then((d) => {
+              if (disposed) return;
+              setDevices(d);
+              const defOut = d.find((dev) => dev.flow !== "capture" && dev.isDefault)?.id ?? d.find((dev) => dev.flow !== "capture")?.id ?? "";
+              const defIn = d.find((dev) => dev.flow === "capture" && dev.isDefault)?.id ?? d.find((dev) => dev.flow === "capture")?.id ?? "";
+              setOutputDeviceId(defOut);
+              setInputDeviceId(defIn);
+            })
+            .catch(() => {});
+          // (Sessions are refreshed by the paired sessions-changed event the
+          // Rust side emits together with devices-changed — no duplicate fetch.)
+        })
+      );
+
       // Apply the persisted close-to-tray behavior as soon as the bridge exists.
       bridge.setCloseBehavior(settingsRef.current.closeToTray).catch(() => {});
     };
@@ -474,18 +497,33 @@ function Dashboard() {
       });
     }, 500);
 
+    // Sessions/devices are event-driven (IAudioSessionNotification +
+    // IMMNotificationClient), so changes arrive instantly. Two lightweight
+    // safety polls remain:
+    //  - master volume/mute every 3s (Windows changes it externally: media
+    //    keys, mixer, hotkeys);
+    //  - session list every 10s as a fallback, because WASAPI has no
+    //    "session destroyed" callback — when an app closes its session dies
+    //    without any event, and this poll sweeps the stale card away.
     const pollIv = window.setInterval(() => {
       const b2 = bridgeRef.current;
       if (b2) {
-        b2.getSessions().then((s) => { if (!disposed) setSessions(s); }).catch(() => {});
         b2.getMasterControl().then((m) => { if (!disposed) setMaster(m); }).catch(() => {});
       }
     }, 3000);
+
+    const sessionSweepIv = window.setInterval(() => {
+      const b2 = bridgeRef.current;
+      if (b2) {
+        b2.getSessions().then((s) => { if (!disposed) setSessions(s); }).catch(() => {});
+      }
+    }, 10000);
 
     return () => {
       disposed = true;
       window.clearInterval(statsIv);
       window.clearInterval(pollIv);
+      window.clearInterval(sessionSweepIv);
       if (flushTimerRef.current !== null) window.clearTimeout(flushTimerRef.current);
       if (masterTimerRef.current !== null) window.clearTimeout(masterTimerRef.current);
       cleanupFns.forEach((fn) => fn());

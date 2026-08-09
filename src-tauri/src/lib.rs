@@ -60,6 +60,10 @@ pub fn run() {
             app.manage(engine);
             info!("audio engine initialized and managed");
 
+            // WASAPI change notifications (instant session/device events).
+            let _notifier = audio::notify::spawn_notification_thread(app.handle().clone());
+            info!("WASAPI notification thread started");
+
             // Set up system tray with menu
             setup_tray(app)?;
 

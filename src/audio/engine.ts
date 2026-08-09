@@ -44,6 +44,9 @@ export interface AudioBridge {
   
   /** Subscribe to session change events. Returns unsubscribe function. */
   onSessionsChanged(callback: () => void): () => void;
+
+  /** Subscribe to device/endpoint change events. Returns unsubscribe function. */
+  onDevicesChanged(callback: () => void): () => void;
   
   /** Enable or disable an audio endpoint in Windows */
   toggleDeviceEnabled(deviceId: string, enabled: boolean): Promise<void>;
@@ -84,6 +87,7 @@ class TauriBridge implements AudioBridge {
   readonly mode: EngineMode = "wasapi";
   private unsubscribeVumeter: (() => void) | null = null;
   private unsubscribeSessions: (() => void) | null = null;
+  private unsubscribeDevices: (() => void) | null = null;
 
   async init(): Promise<{ sessions: AudioSessionInfo[]; devices: AudioDeviceInfo[] }> {
     try {
@@ -205,9 +209,30 @@ class TauriBridge implements AudioBridge {
     };
   }
 
+  onDevicesChanged(callback: () => void): () => void {
+    let disposed = false;
+    
+    listen<void>("devices-changed", () => {
+      callback();
+    }).then((unsubscribe) => {
+      if (disposed) {
+        unsubscribe();
+      } else {
+        this.unsubscribeDevices = unsubscribe;
+      }
+    }).catch(console.error);
+
+    return () => {
+      disposed = true;
+      this.unsubscribeDevices?.();
+      this.unsubscribeDevices = null;
+    };
+  }
+
   dispose(): void {
     this.unsubscribeVumeter?.();
     this.unsubscribeSessions?.();
+    this.unsubscribeDevices?.();
   }
 }
 

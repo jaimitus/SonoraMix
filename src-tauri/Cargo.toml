@@ -58,7 +58,11 @@ features = [
     "Win32_System_ProcessStatus",
     "Win32_Graphics_Gdi",
     "Win32_Security",
+    "implement",
 ]
+
+[dependencies.windows-core]
+version = "0.58"
 
 [features]
 default = ["custom-protocol"]
