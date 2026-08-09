@@ -6,7 +6,7 @@
  * even when no app currently holds an open capture session.
  */
 import type { LevelSource } from "../types";
-import VumeterCanvas, { DbReadout } from "./VumeterCanvas";
+import VumeterCanvas, { DbReadout, PeakHoldReadout } from "./VumeterCanvas";
 
 interface DeviceMetersProps {
   outputSource: LevelSource;
@@ -68,6 +68,13 @@ function Row({
       <div className="meter-face h-8 min-w-0 flex-1">
         <VumeterCanvas source={source} channels={2} className="h-full w-full" />
       </div>
+      <span className="flex w-[58px] flex-none items-center justify-center gap-1 rounded border border-rule/30 bg-ink-950/80 px-1 py-1 font-mono">
+        <span className="text-[8px] text-ink-500">PK</span>
+        <PeakHoldReadout
+          source={source}
+          className="text-[9px] text-led-amber transition-colors hover:text-ink-100"
+        />
+      </span>
       <DbReadout
         source={source}
         muted={() => muted}

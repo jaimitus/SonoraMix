@@ -338,8 +338,8 @@ export function PeakHoldReadout({
         maxRef.current = 0;
       }}
       className={className}
-      title="Session peak (click to reset)"
-      aria-label="Session peak level, click to reset"
+      title="Peak level (click to reset)"
+      aria-label="Peak level, click to reset"
     >
       −∞
     </button>
