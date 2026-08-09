@@ -5,7 +5,15 @@
  * to an action.
  */
 import { useEffect, useState } from "react";
-import { ACCENTS, DEFAULT_SHORTCUTS, type AppSettings, type Shortcuts } from "../settings";
+import {
+  ACCENTS,
+  DEFAULT_SHORTCUTS,
+  METER_PRESETS,
+  type AppSettings,
+  type LedSize,
+  type MeterColors,
+  type Shortcuts,
+} from "../settings";
 
 interface SettingsDrawerProps {
   open: boolean;
@@ -139,6 +147,15 @@ export default function SettingsDrawer({
     },
   ];
 
+  const ledSizes: { id: LedSize; label: string }[] = [
+    { id: "compact", label: "Compact" },
+    { id: "standard", label: "Standard" },
+    { id: "large", label: "Large" },
+  ];
+
+  const setZoneColor = (zone: keyof MeterColors, value: string) =>
+    onUpdate("meters", { ...settings.meters, colors: { ...settings.meters.colors, [zone]: value } });
+
   return (
     <>
       <div className="drawer-backdrop" onClick={onClose} aria-hidden="true" />
@@ -193,6 +210,126 @@ export default function SettingsDrawer({
             <p className="mt-2 text-[10px] leading-snug text-ink-500">
               Accent color for the whole console (outputs, master, buttons).
             </p>
+          </section>
+
+          {/* Meters */}
+          <section>
+            <h3 className="typo-caption mb-2.5 text-[10px] font-bold">VU Meters</h3>
+
+            {/* Color presets */}
+            <p className="mb-1.5 text-[10px] font-semibold text-ink-300">Color preset</p>
+            <div className="grid grid-cols-5 gap-1.5">
+              {METER_PRESETS.map((p) => {
+                const active =
+                  settings.meters.colors.green === p.colors.green &&
+                  settings.meters.colors.amber === p.colors.amber &&
+                  settings.meters.colors.red === p.colors.red;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => onUpdate("meters", { ...settings.meters, colors: { ...p.colors } })}
+                    title={`${p.label} meter colors`}
+                    aria-label={`${p.label} meter color preset`}
+                    aria-pressed={active}
+                    className={`flex flex-col items-center gap-1 rounded-md border px-1 py-1.5 transition-all ${
+                      active
+                        ? "border-route/60 bg-route/10"
+                        : "border-rule bg-ink-900/70 hover:border-rule-strong"
+                    }`}
+                  >
+                    <span className="flex h-2 w-full items-stretch gap-0.5" aria-hidden="true">
+                      <span className="flex-1 rounded-sm" style={{ background: p.colors.green }} />
+                      <span className="flex-1 rounded-sm" style={{ background: p.colors.amber }} />
+                      <span className="flex-1 rounded-sm" style={{ background: p.colors.red }} />
+                    </span>
+                    <span className="text-[8px] font-bold uppercase tracking-wider text-ink-300">
+                      {p.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Per-zone custom colors */}
+            <p className="mt-3 mb-1.5 text-[10px] font-semibold text-ink-300">Custom colors</p>
+            <div className="flex flex-col gap-1.5">
+              {(
+                [
+                  { zone: "green", label: "Green zone", color: settings.meters.colors.green },
+                  { zone: "amber", label: "Amber zone", color: settings.meters.colors.amber },
+                  { zone: "red", label: "Red zone", color: settings.meters.colors.red },
+                ] as { zone: keyof MeterColors; label: string; color: string }[]
+              ).map(({ zone, label, color }) => (
+                <label
+                  key={zone}
+                  className="flex items-center justify-between gap-3 rounded-md border border-rule bg-ink-900/70 px-2.5 py-1.5"
+                >
+                  <span className="flex items-center gap-2 text-[11px] text-ink-300">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: color }} aria-hidden="true" />
+                    {label}
+                  </span>
+                  <input
+                    type="color"
+                    value={color}
+                    onChange={(e) => setZoneColor(zone, e.target.value)}
+                    aria-label={`${label} color`}
+                    className="meter-color-input h-6 w-9 cursor-pointer rounded border border-rule bg-transparent"
+                  />
+                </label>
+              ))}
+            </div>
+
+            {/* Brightness slider */}
+            <p className="mt-3 mb-1.5 flex items-center justify-between text-[10px] font-semibold text-ink-300">
+              <span>Brightness</span>
+              <span className="font-mono text-ink-100">{Math.round(settings.meters.brightness * 100)}%</span>
+            </p>
+            <input
+              type="range"
+              min={0.5}
+              max={1.5}
+              step={0.05}
+              value={settings.meters.brightness}
+              onChange={(e) => onUpdate("meters", { ...settings.meters, brightness: Number(e.target.value) })}
+              aria-label="Meter brightness"
+              className="meter-range w-full"
+            />
+            <div className="mt-0.5 flex justify-between text-[8px] text-ink-500">
+              <span>50% · subtle</span>
+              <span>100%</span>
+              <span>150% · hot</span>
+            </div>
+
+            {/* LED size */}
+            <p className="mt-3 mb-1.5 text-[10px] font-semibold text-ink-300">LED segment size</p>
+            <div className="flex items-center gap-1.5 rounded-lg border border-rule bg-ink-900/70 p-1">
+              {ledSizes.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => onUpdate("meters", { ...settings.meters, ledSize: s.id })}
+                  aria-pressed={settings.meters.ledSize === s.id}
+                  className={`flex-1 rounded-md px-2 py-1.5 text-[10px] font-bold tracking-wide transition-all ${
+                    settings.meters.ledSize === s.id
+                      ? "bg-route/20 text-route border border-route/40"
+                      : "text-ink-300 hover:text-ink-100"
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Peak-hold toggle */}
+            <div className="mt-3">
+              <Toggle
+                checked={settings.meters.showPeakHold}
+                onChange={(v) => onUpdate("meters", { ...settings.meters, showPeakHold: v })}
+                label="Show peak-hold line"
+                description="Keep a bright line at the loudest level reached."
+              />
+            </div>
           </section>
 
           {/* Behavior */}

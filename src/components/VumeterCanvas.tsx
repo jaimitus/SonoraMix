@@ -9,6 +9,8 @@
  */
 import { useEffect, useRef } from "react";
 import type { LevelSource } from "../types";
+import { useMeterSettings } from "../meterContext";
+import type { LedSize } from "../settings";
 
 interface VumeterCanvasProps {
   source: LevelSource;
@@ -45,14 +47,31 @@ function toPpmFrac(v: number): number {
   return clamp01(0.70 + (db + 12) * (0.30 / 12));
 }
 
-// Color zones: Green (-80..-12 dBFS), Yellow (-12..-3 dBFS), Red (-3..0 dBFS)
-// Vivid, high-saturation palette that reads clearly against the dark slot:
-//   green  — #25e08a   amber — #ffc01e   red — #ff3d4d
-const ZONE_BODY = ["#25e08a", "#ffc01e", "#ff3d4d"];
-const ZONE_TOP = ["#4cf0a6", "#ffd35c", "#ff6b78"];
-const ZONE_GLOW = ["rgba(37, 224, 138, 0.85)", "rgba(255, 192, 30, 0.9)", "rgba(255, 61, 77, 1)"];
+// Zone thresholds: Green (-80..-12 dBFS), Yellow (-12..-3 dBFS), Red (-3..0 dBFS).
+const zoneIndex = (frac: number) => (frac < 0.70 ? 0 : frac < 0.88 ? 1 : 2);
 
-const zoneGlow = (frac: number) => ZONE_GLOW[frac < 0.70 ? 0 : frac < 0.88 ? 1 : 2]!;
+/** Lighten a #rrggbb color by `amt` (0..1) toward white. */
+function lighten(hex: string, amt: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  const mix = (c: number) => Math.round(c + (255 - c) * amt);
+  return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+}
+
+/** Convert #rrggbb to `rgba(r, g, b, a)`. */
+function toRgba(hex: string, alpha: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+/** Segment density per LED size preset (higher = fewer, thicker segments). */
+const LED_SIZE_FACTOR: Record<LedSize, number> = {
+  compact: 0.75,
+  standard: 1,
+  large: 1.35,
+};
 
 export default function VumeterCanvas({
   source,
@@ -63,6 +82,9 @@ export default function VumeterCanvas({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const sourceRef = useRef(source);
   sourceRef.current = source;
+  // Read appearance settings live every frame (no re-init needed on change).
+  const settingsRef = useRef(useMeterSettings());
+  settingsRef.current = useMeterSettings(); // keep the rAF loop in sync
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -118,7 +140,8 @@ export default function VumeterCanvas({
       const gapX = channels === 2 ? 4 : 0;
       const colW = (cssW - gapX * (channels - 1)) / channels;
       const segGap = 1.5;
-      const segCount = Math.max(16, Math.floor((cssH - 2) / 4.5));
+      const segPitch = 4.5 * LED_SIZE_FACTOR[settingsRef.current.ledSize];
+      const segCount = Math.max(12, Math.floor((cssH - 2) / segPitch));
       const segH = (cssH - segGap * (segCount - 1)) / segCount;
 
       for (let c = 0; c < channels; c++) {
@@ -171,59 +194,72 @@ export default function VumeterCanvas({
         const targetFrac = toPpmFrac(st.disp);
         const litCount = Math.min(segCount, Math.round(targetFrac * segCount));
 
-        // Pre-create the three zone gradients ONCE per column (not per segment):
-        // the gradient spans the full column height and is reused for every
-        // lit segment in its zone, avoiding ~thousands of allocations/sec.
+        // Build zone gradients from the current appearance settings (once per
+        // column per frame, not per segment — avoids thousands of allocations).
+        const meter = settingsRef.current;
+        const bodies = [meter.colors.green, meter.colors.amber, meter.colors.red];
+        const bright = Math.min(1.5, Math.max(0.5, meter.brightness));
+        const glowAlpha = 0.6 + 0.4 * bright;
         const gradCache: CanvasGradient[] = [];
         for (let z = 0; z < 3; z++) {
           const g = ctx.createLinearGradient(0, 0, 0, cssH);
-          g.addColorStop(0, ZONE_TOP[z]!);
-          g.addColorStop(0.5, ZONE_BODY[z]!);
-          g.addColorStop(1, ZONE_BODY[z]!);
+          g.addColorStop(0, lighten(bodies[z]!, 0.38));
+          g.addColorStop(0.5, bodies[z]!);
+          g.addColorStop(1, bodies[z]!);
           gradCache.push(g);
         }
 
-        for (let s = 0; s < segCount; s++) {
-          const y = cssH - segH - s * (segH + segGap);
-          const frac = (s + 0.5) / segCount;
+        for (let seg = 0; seg < segCount; seg++) {
+          const y = cssH - segH - seg * (segH + segGap);
+          const frac = (seg + 0.5) / segCount;
 
-          if (s >= litCount) {
+          if (seg >= litCount) {
             // Dark unlit segment — deep recess so lit LEDs pop
             ctx.fillStyle = "rgba(22, 26, 32, 0.7)";
             ctx.fillRect(x + inset + 0.5, y, colW - inset * 2 - 1, segH - 0.5);
             continue;
           }
 
-          const zone = frac < 0.70 ? 0 : frac < 0.88 ? 1 : 2;
+          const zone = zoneIndex(frac);
 
-          // Active LED segment — vertical gradient (bright top, rich body)
+          // Active LED segment — vertical gradient (bright top, rich body).
+          // Brightness scales global alpha (glow intensity); >1 adds a white
+          // boost on the body to push it toward a hotter look.
+          ctx.globalAlpha = Math.min(1, bright);
           ctx.fillStyle = gradCache[zone]!;
           ctx.fillRect(x + inset + 0.5, y, colW - inset * 2 - 1, segH - 0.5);
+          if (bright > 1) {
+            ctx.fillStyle = `rgba(255, 255, 255, ${((bright - 1) * 0.35).toFixed(3)})`;
+            ctx.fillRect(x + inset + 0.5, y, colW - inset * 2 - 1, segH - 0.5);
+          }
+          ctx.globalAlpha = 1;
 
           // Emissive glow on leading top segment
-          if (s === litCount - 1) {
+          if (seg === litCount - 1) {
             ctx.save();
-            ctx.shadowColor = zoneGlow(frac);
-            ctx.shadowBlur = 10;
+            ctx.shadowColor = toRgba(bodies[zone]!, Math.min(1, glowAlpha));
+            ctx.shadowBlur = 8 + 6 * bright;
             ctx.fillRect(x + inset + 0.5, y, colW - inset * 2 - 1, segH - 0.5);
             ctx.restore();
           }
 
           // Specular reflection on segment top
-          ctx.fillStyle = "rgba(255, 255, 255, 0.28)";
+          ctx.fillStyle = `rgba(255, 255, 255, ${(0.2 + 0.12 * bright).toFixed(3)})`;
           ctx.fillRect(x + inset + 0.5, y, colW - inset * 2 - 1, 1);
         }
 
         // Peak-hold line — bright, thin, clearly readable
-        const peakFrac = toPpmFrac(st.peak);
-        if (peakFrac > 0.02) {
-          const py = cssH - peakFrac * cssH;
-          ctx.save();
-          ctx.shadowColor = "rgba(255, 255, 255, 0.8)";
-          ctx.shadowBlur = 3;
-          ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
-          ctx.fillRect(x + inset + 0.5, Math.max(0, py - 1), colW - inset * 2 - 1, 1.5);
-          ctx.restore();
+        if (settingsRef.current.showPeakHold) {
+          const peakFrac = toPpmFrac(st.peak);
+          if (peakFrac > 0.02) {
+            const py = cssH - peakFrac * cssH;
+            ctx.save();
+            ctx.shadowColor = "rgba(255, 255, 255, 0.8)";
+            ctx.shadowBlur = 3;
+            ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+            ctx.fillRect(x + inset + 0.5, Math.max(0, py - 1), colW - inset * 2 - 1, 1.5);
+            ctx.restore();
+          }
         }
 
         // Clip indicator flash (top red bar)

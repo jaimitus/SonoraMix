@@ -34,6 +34,7 @@ import StatusBar from "./components/StatusBar";
 import UpdateBanner from "./components/UpdateBanner";
 import VumeterCanvas, { DbReadout } from "./components/VumeterCanvas";
 import { loadState, saveState, type AppSettings, type PersistedState } from "./settings";
+import { MeterSettingsContext } from "./meterContext";
 import { getDisplayName } from "./utils/names";
 
 const ZERO_LEVEL: LevelSample = { peak: 0, left: 0, right: 0, ts: 0 };
@@ -769,6 +770,7 @@ function Dashboard() {
   const deviceName = devices.find((d) => d.id === outputDeviceId)?.name ?? "";
 
   return (
+    <MeterSettingsContext.Provider value={persisted.settings.meters}>
     <div className="h-screen w-screen flex flex-col overflow-hidden font-sans text-ink-100">
       <Header
         devices={devices}
@@ -1117,6 +1119,7 @@ function Dashboard() {
 
       {!bootDone && <BootOverlay version={appVersion} onDone={() => setBootDone(true)} />}
     </div>
+    </MeterSettingsContext.Provider>
   );
 }
 

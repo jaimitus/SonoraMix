@@ -368,6 +368,69 @@
     border-radius: 4px;
     overflow: hidden;
   }
+
+  /* ── VU meter settings controls ────────────────────────────────── */
+  .meter-range {
+    appearance: none;
+    -webkit-appearance: none;
+    height: 18px;
+    background: transparent;
+    cursor: pointer;
+  }
+  .meter-range::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, rgba(37, 224, 138, 0.45), rgba(255, 192, 30, 0.45), rgba(255, 61, 77, 0.45));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .meter-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    margin-top: -6px;
+    height: 14px;
+    width: 14px;
+    border-radius: 50%;
+    background: #eef0f3;
+    border: 2px solid #0b0d0f;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+    transition: transform 0.12s ease;
+  }
+  .meter-range::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+  }
+  .meter-range::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .meter-range::-moz-range-thumb {
+    height: 12px;
+    width: 12px;
+    border-radius: 50%;
+    background: #eef0f3;
+    border: 2px solid #0b0d0f;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  }
+
+  .meter-color-input {
+    appearance: none;
+    -webkit-appearance: none;
+    padding: 0;
+    border-radius: 6px;
+    background: transparent;
+  }
+  .meter-color-input::-webkit-color-swatch-wrapper {
+    padding: 2px;
+  }
+  .meter-color-input::-webkit-color-swatch {
+    border: none;
+    border-radius: 4px;
+  }
+  .meter-color-input::-moz-color-swatch {
+    border: none;
+    border-radius: 4px;
+  }
 }
 
 /* ── keyframes ───────────────────────────────────────────────────── */
