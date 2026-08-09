@@ -24,6 +24,57 @@
 
 @import "tailwindcss";
 
+/* ── Local fonts (bundled — no Google Fonts CDN, works offline) ── */
+@font-face {
+  font-family: "Inter";
+  src: url("./assets/fonts/inter-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./assets/fonts/inter-latin-500-normal.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./assets/fonts/inter-latin-600-normal.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("./assets/fonts/inter-latin-700-normal.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Kode Mono";
+  src: url("./assets/fonts/kode-mono-latin-400-normal.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Kode Mono";
+  src: url("./assets/fonts/kode-mono-latin-500-normal.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Kode Mono";
+  src: url("./assets/fonts/kode-mono-latin-600-normal.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme {
   --font-sans: "Inter", "Segoe UI Variable", system-ui, sans-serif;
   --font-mono: "Kode Mono", "IBM Plex Mono", "Cascadia Mono", Consolas, monospace;
@@ -337,9 +388,110 @@
   50% { opacity: 1; }
 }
 
+/* ── Accent themes ────────────────────────────────────────────────
+ * Tailwind v4 utilities reference var(--color-signal/-route), so
+ * overriding the tokens on <html data-accent="…"> re-skins the app.
+ */
+:root {
+  --color-signal: #ff7940;
+  --color-route: #33d1b8;
+}
+html[data-accent="emerald"] {
+  --color-signal: #2dd4a0;
+  --color-route: #38bdf8;
+}
+html[data-accent="ocean"] {
+  --color-signal: #38bdf8;
+  --color-route: #2dd4a0;
+}
+html[data-accent="blossom"] {
+  --color-signal: #f472b6;
+  --color-route: #38bdf8;
+}
+html[data-accent="violet"] {
+  --color-signal: #a78bfa;
+  --color-route: #2dd4a0;
+}
+html[data-accent="gold"] {
+  --color-signal: #fbbf24;
+  --color-route: #34d399;
+}
+
+/* ── STANDBY channel dimming (inactive audio sessions) ─────────── */
+.channel-standby {
+  opacity: 0.62;
+  filter: saturate(0.45);
+  transition: opacity 0.25s ease, filter 0.25s ease;
+}
+.channel-standby:hover {
+  opacity: 0.95;
+  filter: saturate(0.9);
+}
+
+/* ── Settings drawer ───────────────────────────────────────────── */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(5, 7, 9, 0.55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: fade-in 0.18s ease both;
+}
+.drawer-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 51;
+  width: min(340px, 100vw);
+  transform: translateX(0);
+  animation: drawer-in 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes drawer-in {
+  from { transform: translateX(100%); }
+}
+
+/* Accent swatch picker */
+.accent-swatch {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.accent-swatch:hover {
+  transform: translateY(-2px);
+}
+.accent-swatch.active {
+  border-color: var(--color-ink-100);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08);
+}
+
+/* Settings toggle row */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--color-field);
+  border: 1px solid var(--color-rule);
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+.toggle-row:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .led-pulse,
   .toast,
+  .drawer-panel,
+  .drawer-backdrop,
   *[class*="fade-in"] {
     animation: none !important;
   }

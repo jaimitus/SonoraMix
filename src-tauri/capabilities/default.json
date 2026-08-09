@@ -10,7 +10,12 @@
     "core:window:allow-hide",
     "core:window:allow-set-focus",
     "core:window:allow-minimize",
+    "core:window:allow-set-position",
+    "core:window:allow-set-size",
+    "core:window:allow-outer-position",
+    "core:window:allow-outer-size",
     "updater:default",
-    "process:default"
+    "process:default",
+    "autostart:default"
   ]
 }

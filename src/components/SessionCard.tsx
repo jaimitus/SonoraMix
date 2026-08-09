@@ -3,14 +3,15 @@
  * Fixed 240px module width to guarantee 100% layout stability on window resize.
  *
  * Anatomy:
- *   - Top: App Icon + Name + Mic/Mute badges
+ *   - Top: App Icon + Name (double-click to rename) + Pin/Mic-Mute badges
  *   - Center: Vertical Fader (76px) | dB Scale (28px) | Dual Stereo PPM Meter (76px)
- *   - Bottom: Mute Toggle + live dBFS readout
+ *   - Bottom: Mute Toggle + peak-hold + live dBFS readout
  */
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { AudioSessionInfo, LevelSource } from "../types";
+import { getDisplayName } from "../utils/names";
 import Fader from "./Fader";
-import VumeterCanvas, { DbReadout } from "./VumeterCanvas";
+import VumeterCanvas, { DbReadout, PeakHoldReadout } from "./VumeterCanvas";
 
 interface SessionCardProps {
   session: AudioSessionInfo;
@@ -18,36 +19,15 @@ interface SessionCardProps {
   source: LevelSource;
   onVolume: (id: string, volume: number) => void;
   onMute: (id: string, muted: boolean) => void;
+  /** Custom display name from the user's renames (falls back to the exe map) */
+  customName?: string;
+  /** Whether the channel is pinned to the top */
+  pinned?: boolean;
+  onTogglePin?: () => void;
+  /** Commit a new display name (empty to revert to default) */
+  onRename?: (name: string) => void;
   /** Optional: opens the Windows per-app output routing page (render sessions only) */
   onRoute?: () => void;
-}
-
-const DISPLAY_NAMES: Record<string, string> = {
-  "spotify.exe": "Spotify",
-  "chrome.exe": "Chrome",
-  "msedge.exe": "Edge",
-  "firefox.exe": "Firefox",
-  "discord.exe": "Discord",
-  "cs2.exe": "Counter-Strike 2",
-  "obs64.exe": "OBS Studio",
-  "vlc.exe": "VLC",
-  "steam.exe": "Steam",
-  "teams.exe": "Teams",
-  "slack.exe": "Slack",
-  "zoom.exe": "Zoom",
-  "windowsterminal.exe": "Terminal",
-  "code.exe": "VS Code",
-  "devenv.exe": "Visual Studio",
-  "ms-teams.exe": "Teams",
-  "thunderbird.exe": "Thunderbird",
-  "notion-app.exe": "Notion",
-};
-
-function getDisplayName(exe: string): string {
-  const n = exe.toLowerCase();
-  if (DISPLAY_NAMES[n]) return DISPLAY_NAMES[n];
-  const base = exe.replace(/\.exe$/i, "");
-  return base.charAt(0).toUpperCase() + base.slice(1);
 }
 
 const hueOf = (pid: number): number => (pid * 137 + 20) % 360;
@@ -58,25 +38,57 @@ export default function SessionCard({
   source,
   onVolume,
   onMute,
+  customName,
+  pinned,
+  onTogglePin,
+  onRename,
   onRoute,
 }: SessionCardProps) {
   const mutedRef = useRef(session.muted);
   mutedRef.current = session.muted;
 
-  const displayName = getDisplayName(session.exe);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const editingRef = useRef(false);
+
+  const displayName = customName || getDisplayName(session.exe);
   const hue = useMemo(() => hueOf(session.pid), [session.pid]);
   const pid = session.pid;
+  const standby = session.state === "inactive";
+
+  // Commit only if we're still in editing mode — unmounting the input fires
+  // `blur`, which must NOT commit a cancelled (Escape) rename.
+  const commitRename = () => {
+    if (!editingRef.current) return;
+    editingRef.current = false;
+    setEditing(false);
+    if (onRename) onRename(draft);
+  };
+
+  const cancelRename = () => {
+    editingRef.current = false;
+    setEditing(false);
+  };
+
+  const startEditing = () => {
+    if (!onRename) return;
+    setDraft(displayName);
+    editingRef.current = true;
+    setEditing(true);
+  };
 
   return (
     <article
-      className="group relative flex flex-col w-[240px] p-3.5 rounded-xl bg-panel-2/70 border border-rule hover:border-rule-strong transition-[border-color,box-shadow] duration-200"
+      className={`group relative flex flex-col w-[240px] p-3.5 rounded-xl bg-panel-2/70 border border-rule hover:border-rule-strong transition-[border-color,box-shadow,opacity,filter] duration-200 ${
+        standby ? "channel-standby" : ""
+      }`}
       style={{
         boxShadow: `inset 0 1px 0 rgba(255,255,255,0.03), 0 8px 22px rgba(0,0,0,0.3)`,
         animationDelay: `${Math.min(index, 12) * 45}ms`,
       }}
       aria-label={`${displayName} channel strip, volume ${Math.round(session.volume * 100)}%, ${session.muted ? "muted" : "active"}`}
     >
-      {/* Top Header: App icon + Display Name + Badge */}
+      {/* Top Header: App icon + Display Name + Pin/Badges */}
       <div className="mb-3 flex items-center gap-2.5">
         <div
           className="flex h-8 w-8 flex-none items-center justify-center overflow-hidden rounded-md border"
@@ -105,15 +117,47 @@ export default function SessionCard({
 
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-1">
-            <h3
-              className={`truncate font-semibold text-[12px] tracking-tight ${
-                session.muted ? "text-ink-300" : "text-ink-100"
-              }`}
-              title={session.exe}
-            >
-              {displayName}
-            </h3>
+            {editing ? (
+              <input
+                autoFocus
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={commitRename}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitRename();
+                  if (e.key === "Escape") cancelRename();
+                }}
+                className="w-full min-w-0 rounded border border-route/40 bg-ink-950 px-1 py-0.5 text-[12px] font-semibold text-ink-100 outline-none"
+                aria-label="Channel name"
+              />
+            ) : (
+              <h3
+                className={`truncate font-semibold text-[12px] tracking-tight ${
+                  session.muted ? "text-ink-300" : "text-ink-100"
+                }`}
+                title={`${session.exe} — double-click to rename`}
+                onDoubleClick={startEditing}
+              >
+                {displayName}
+              </h3>
+            )}
             <div className="flex shrink-0 items-center gap-1">
+              {onTogglePin && (
+                <button
+                  type="button"
+                  onClick={onTogglePin}
+                  aria-pressed={!!pinned}
+                  title={pinned ? `Unpin ${displayName}` : `Pin ${displayName} to the top`}
+                  className={`flex h-[15px] w-[15px] items-center justify-center rounded transition-colors ${
+                    pinned ? "text-signal" : "text-ink-500 opacity-0 group-hover:opacity-100 hover:text-ink-100"
+                  }`}
+                >
+                  <svg viewBox="0 0 16 16" className="h-3 w-3" fill={pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                    <path d="M9.8 2.3a1 1 0 0 1 1.4 0l2.5 2.5a1 1 0 0 1 0 1.4l-1.5 1.5L9 5l1.5-1.5a1 1 0 0 1-.7-1.2Z" strokeLinejoin="round" />
+                    <path d="M9 5 6.8 7.2a5.5 5.5 0 0 0-1.4 5.4l.4 1-2.5 2.5L2 14.6l2.5-2.5 1 .3a5.5 5.5 0 0 0 5.4-1.4L13 8.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              )}
               {session.flow === "capture" ? (
                 <span className="rounded px-1 py-0.2 text-[8px] font-bold tracking-wider uppercase text-route bg-route/15 border border-route/30">
                   MIC
@@ -180,7 +224,7 @@ export default function SessionCard({
         </div>
       </div>
 
-      {/* Bottom Footer: Mute Toggle + live dBFS Readout */}
+      {/* Bottom Footer: Mute Toggle + Peak hold + live dBFS Readout */}
       <div className="mt-2.5 flex items-center justify-between gap-2">
         <button
           type="button"
@@ -198,7 +242,7 @@ export default function SessionCard({
         </button>
 
         <div className="flex items-center gap-1.5">
-          {session.flow !== "capture" && onRoute && (
+          {session.flow === "render" && onRoute && (
             <button
               type="button"
               onClick={onRoute}
@@ -210,6 +254,12 @@ export default function SessionCard({
                 <path d="M2 8h12M9 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
+          )}
+          {session.flow === "render" && (
+            <span className="flex items-center gap-1 font-mono text-[8px] text-ink-500 bg-ink-950/80 px-1.5 py-1 rounded border border-rule/30">
+              <span className="text-ink-500">PK</span>
+              <PeakHoldReadout source={source} className="font-mono text-[9px] text-led-amber cursor-pointer hover:text-ink-100" />
+            </span>
           )}
           <div className="flex items-center gap-1 font-mono text-[9px] text-ink-300 bg-ink-950/80 px-2 py-1 rounded border border-rule/30">
             <span className="text-[8px] text-ink-500">dBFS</span>

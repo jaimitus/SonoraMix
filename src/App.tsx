@@ -19,11 +19,16 @@ import Fader from "./components/Fader";
 import { createBridge, type AudioBridge } from "./audio/engine";
 import { checkForUpdates, currentVersion, installUpdate, isTauri, APP_VERSION } from "./updater";
 import type { Update } from "@tauri-apps/plugin-updater";
+import { disable as disableAutostart, enable as enableAutostart } from "@tauri-apps/plugin-autostart";
+import { LogicalPosition, LogicalSize, getCurrentWindow } from "@tauri-apps/api/window";
 import Header from "./components/Header";
 import SessionCard from "./components/SessionCard";
+import SettingsDrawer from "./components/SettingsDrawer";
 import StatusBar from "./components/StatusBar";
 import UpdateBanner from "./components/UpdateBanner";
 import VumeterCanvas, { DbReadout } from "./components/VumeterCanvas";
+import { loadState, saveState, type AppSettings, type PersistedState } from "./settings";
+import { getDisplayName } from "./utils/names";
 
 const ZERO_LEVEL: LevelSample = { peak: 0, left: 0, right: 0, ts: 0 };
 
@@ -99,6 +104,13 @@ function Dashboard() {
   const masterVolumeRef = useRef(1);
   const masterMutedRef = useRef(false);
 
+  const [persisted, setPersisted] = useState<PersistedState>(() => loadState());
+  const settingsRef = useRef(persisted.settings);
+  settingsRef.current = persisted.settings;
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
   const showToast = useCallback((kind: ToastItem["kind"], title: string, body?: string) => {
     const id = ++toastIdRef.current;
     setToasts((prev) => [...prev.slice(-3), { id, kind, title, body }]);
@@ -172,6 +184,134 @@ function Dashboard() {
     masterMutedRef.current = master.muted;
   }, [master]);
 
+  // ── Persistence + accent theme ──────────────────────────────────
+  useEffect(() => {
+    document.documentElement.dataset.accent = persisted.settings.accent;
+    saveState(persisted);
+  }, [persisted]);
+
+  // ── Close-to-tray behavior (initial value also applied at attach) ──
+  useEffect(() => {
+    bridgeRef.current?.setCloseBehavior(persisted.settings.closeToTray).catch(() => {});
+  }, [persisted.settings.closeToTray]);
+
+  // ── Autostart with Windows (desktop only) ───────────────────────
+  useEffect(() => {
+    if (!isTauri()) return;
+    if (persisted.settings.autostart) enableAutostart().catch(() => {});
+    else disableAutostart().catch(() => {});
+  }, [persisted.settings.autostart]);
+
+  // ── Launch minimized to tray ────────────────────────────────────
+  useEffect(() => {
+    if (!isTauri() || !persisted.settings.launchMinimized) return;
+    const t = window.setTimeout(() => {
+      getCurrentWindow().minimize().catch(() => {});
+    }, 1600);
+    return () => window.clearTimeout(t);
+  }, [persisted.settings.launchMinimized]);
+
+  // ── Window bounds persistence (restore on launch, save on move/resize) ──
+  useEffect(() => {
+    if (!isTauri()) return;
+    const win = getCurrentWindow();
+    try {
+      const raw = localStorage.getItem("sonoramix.window.v1");
+      if (raw) {
+        const { x, y, width, height } = JSON.parse(raw) as { x: number; y: number; width: number; height: number };
+        win.setSize(new LogicalSize(width, height)).catch(() => {});
+        win.setPosition(new LogicalPosition(x, y)).catch(() => {});
+      }
+    } catch {
+      /* corrupted state — ignore */
+    }
+    let timer: number | null = null;
+    const save = () => {
+      Promise.all([win.outerPosition(), win.outerSize()])
+        .then(([pos, size]) => {
+          localStorage.setItem(
+            "sonoramix.window.v1",
+            JSON.stringify({ x: pos.x, y: pos.y, width: size.width, height: size.height })
+          );
+        })
+        .catch(() => {});
+    };
+    const debounced = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(save, 400);
+    };
+    const unlistenResize = win.onResized(debounced);
+    const unlistenMove = win.onMoved(debounced);
+    return () => {
+      if (timer !== null) window.clearTimeout(timer);
+      unlistenResize.then((f) => f()).catch(() => {});
+      unlistenMove.then((f) => f()).catch(() => {});
+    };
+  }, []);
+
+  // ── Settings handlers ───────────────────────────────────────────
+  const updateSetting = useCallback(<K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
+    setPersisted((prev) => ({ ...prev, settings: { ...prev.settings, [key]: value } }));
+  }, []);
+
+  const togglePin = useCallback((id: string) => {
+    setPersisted((prev) => {
+      const pinned = prev.pinned.includes(id)
+        ? prev.pinned.filter((p) => p !== id)
+        : [...prev.pinned, id];
+      return { ...prev, pinned };
+    });
+  }, []);
+
+  const renameChannel = useCallback((exe: string, name: string) => {
+    const key = exe.toLowerCase();
+    setPersisted((prev) => {
+      const renames = { ...prev.renames };
+      const trimmed = name.trim();
+      if (trimmed && trimmed !== getDisplayName(key)) renames[key] = trimmed;
+      else delete renames[key];
+      return { ...prev, renames };
+    });
+  }, []);
+
+  // ── Search + pin-aware session lists ────────────────────────────
+  const displayNameFor = useCallback(
+    (s: AudioSessionInfo) => persisted.renames[s.exe.toLowerCase()] ?? getDisplayName(s.exe),
+    [persisted.renames],
+  );
+
+  const matchesQuery = useCallback(
+    (s: AudioSessionInfo) => {
+      const q = searchQuery.trim().toLowerCase();
+      if (!q) return true;
+      return displayNameFor(s).toLowerCase().includes(q) || s.exe.toLowerCase().includes(q);
+    },
+    [searchQuery, displayNameFor],
+  );
+
+  const sortPinned = useCallback(
+    (list: AudioSessionInfo[]) => {
+      const pinnedSet = new Set(persisted.pinned);
+      return [...list].sort((a, b) => {
+        const pa = pinnedSet.has(a.id) ? 0 : 1;
+        const pb = pinnedSet.has(b.id) ? 0 : 1;
+        if (pa !== pb) return pa - pb;
+        return a.exe.toLowerCase().localeCompare(b.exe.toLowerCase());
+      });
+    },
+    [persisted.pinned],
+  );
+
+  const allFiltered = useMemo(() => sessions.filter(matchesQuery), [sessions, matchesQuery]);
+  const inputSessions = useMemo(
+    () => sortPinned(allFiltered.filter((s) => s.flow === "capture")),
+    [allFiltered, sortPinned],
+  );
+  const outputSessions = useMemo(
+    () => sortPinned(allFiltered.filter((s) => s.flow !== "capture")),
+    [allFiltered, sortPinned],
+  );
+
   useEffect(() => {
     let disposed = false;
     const cleanupFns: Array<() => void> = [];
@@ -223,6 +363,9 @@ function Dashboard() {
           bridge.getSessions().then((s) => { if (!disposed) setSessions(s); }).catch(() => {});
         })
       );
+
+      // Apply the persisted close-to-tray behavior as soon as the bridge exists.
+      bridge.setCloseBehavior(settingsRef.current.closeToTray).catch(() => {});
     };
 
     (async () => {
@@ -340,12 +483,24 @@ function Dashboard() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        return;
+      }
       if (e.key.toLowerCase() === "r") { e.preventDefault(); rescan(); }
-      if (e.key === "Escape" && !bootDone) setBootDone(true);
+      if (e.key === "Escape") {
+        if (searchQuery) {
+          setSearchQuery("");
+          searchInputRef.current?.blur();
+        } else if (!bootDone) {
+          setBootDone(true);
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [rescan, bootDone]);
+  }, [rescan, bootDone, searchQuery]);
 
   const flushMasterVolume = useCallback(() => {
     const v = pendingMasterRef.current;
@@ -402,8 +557,6 @@ function Dashboard() {
     [devices, showToast],
   );
 
-  const inputSessions = useMemo(() => sessions.filter((s) => s.flow === "capture"), [sessions]);
-  const outputSessions = useMemo(() => sessions.filter((s) => s.flow !== "capture"), [sessions]);
   const isStreaming = stats.hz > 20;
   const deviceName = devices.find((d) => d.id === outputDeviceId)?.name ?? "";
 
@@ -419,10 +572,20 @@ function Dashboard() {
         mode={mode}
         streaming={isStreaming}
         onTray={handleTray}
+        onOpenSettings={() => setSettingsOpen(true)}
         onCheckUpdates={() => handleCheckUpdates()}
         checkingUpdates={updateUi.kind === "checking"}
         downloading={updateUi.kind === "downloading"}
         updateAvailable={updateUi.kind === "available" || updateUi.kind === "downloading"}
+      />
+
+      <SettingsDrawer
+        open={settingsOpen}
+        settings={persisted.settings}
+        onClose={() => setSettingsOpen(false)}
+        onUpdate={updateSetting}
+        appVersion={appVersion}
+        desktop={isTauri()}
       />
 
       {(updateUi.kind === "available" || updateUi.kind === "downloading") && !updateDismissed && (
@@ -451,40 +614,75 @@ function Dashboard() {
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 bg-ink-900/80 p-1 rounded-lg border border-rule/50">
-              <button
-                type="button"
-                onClick={() => setFilterTab("all")}
-                className={`px-3 py-1.5 rounded-md text-[11px] font-bold tracking-wide transition-all ${
-                  filterTab === "all"
-                    ? "bg-signal/20 text-signal border border-signal/40 shadow-sm"
-                    : "text-ink-300 hover:text-ink-100"
-                }`}
-              >
-                🎛️ DUAL CONSOLE ({sessions.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterTab("render")}
-                className={`px-3 py-1.5 rounded-md text-[11px] font-bold tracking-wide transition-all ${
-                  filterTab === "render"
-                    ? "bg-signal/20 text-signal border border-signal/40 shadow-sm"
-                    : "text-ink-300 hover:text-ink-100"
-                }`}
-              >
-                🔊 OUTPUTS ({outputSessions.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setFilterTab("capture")}
-                className={`px-3 py-1.5 rounded-md text-[11px] font-bold tracking-wide transition-all ${
-                  filterTab === "capture"
-                    ? "bg-route/20 text-route border border-route/40 shadow-sm"
-                    : "text-ink-300 hover:text-ink-100"
-                }`}
-              >
-                🎙️ INPUTS ({inputSessions.length})
-              </button>
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Channel search (Ctrl+F) */}
+              <div className="relative">
+                <input
+                  ref={searchInputRef}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search channels… (Ctrl+F)"
+                  className="h-[30px] w-[170px] rounded-lg bg-ink-900/80 border border-rule/50 pl-2.5 pr-7 text-[11px] font-mono text-ink-100 placeholder:text-ink-500 outline-none focus:border-route/50 transition-colors"
+                  aria-label="Search channels"
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape") {
+                      setSearchQuery("");
+                      e.currentTarget.blur();
+                    }
+                  }}
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery("");
+                      searchInputRef.current?.focus();
+                    }}
+                    aria-label="Clear search"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-500 transition-colors hover:text-ink-100"
+                  >
+                    <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                      <path d="M3 3l10 10M13 3L3 13" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5 bg-ink-900/80 p-1 rounded-lg border border-rule/50">
+                <button
+                  type="button"
+                  onClick={() => setFilterTab("all")}
+                  className={`px-3 py-1.5 rounded-md text-[11px] font-bold tracking-wide transition-all ${
+                    filterTab === "all"
+                      ? "bg-signal/20 text-signal border border-signal/40 shadow-sm"
+                      : "text-ink-300 hover:text-ink-100"
+                  }`}
+                >
+                  🎛️ DUAL CONSOLE ({allFiltered.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterTab("render")}
+                  className={`px-3 py-1.5 rounded-md text-[11px] font-bold tracking-wide transition-all ${
+                    filterTab === "render"
+                      ? "bg-signal/20 text-signal border border-signal/40 shadow-sm"
+                      : "text-ink-300 hover:text-ink-100"
+                  }`}
+                >
+                  🔊 OUTPUTS ({outputSessions.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFilterTab("capture")}
+                  className={`px-3 py-1.5 rounded-md text-[11px] font-bold tracking-wide transition-all ${
+                    filterTab === "capture"
+                      ? "bg-route/20 text-route border border-route/40 shadow-sm"
+                      : "text-ink-300 hover:text-ink-100"
+                  }`}
+                >
+                  🎙️ INPUTS ({inputSessions.length})
+                </button>
+              </div>
             </div>
           </div>
 
@@ -517,26 +715,41 @@ function Dashboard() {
 
                     {inputSessions.length === 0 ? (
                       <div className="rounded-lg border border-dashed border-rule/60 p-6 text-center">
-                        <p className="typo-caption text-ink-300">No microphone channels detected</p>
-                        <p className="mx-auto mt-1 max-w-md text-[11px] leading-relaxed text-ink-500">
-                          Windows only creates mic channels while an app is actually using the
-                          microphone — in a Discord call, OBS recording or voice chat. Start using
-                          your mic and the channel appears here automatically.
+                        <p className="typo-caption text-ink-300">
+                          {searchQuery ? `No channels match “${searchQuery}”` : "No microphone channels detected"}
                         </p>
-                        <button type="button" onClick={rescan} className="btn btn-ghost mt-3">
-                          <svg
-                            viewBox="0 0 16 16"
-                            className="h-3 w-3"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                            aria-hidden="true"
+                        <p className="mx-auto mt-1 max-w-md text-[11px] leading-relaxed text-ink-500">
+                          {searchQuery
+                            ? "Try a different search term or clear the filter."
+                            : "Windows only creates mic channels while an app is actually using the microphone — in a Discord call, OBS recording or voice chat. Start using your mic and the channel appears here automatically."}
+                        </p>
+                        {searchQuery ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSearchQuery("");
+                              searchInputRef.current?.focus();
+                            }}
+                            className="btn btn-ghost mt-3"
                           >
-                            <path d="M13 8a5 5 0 1 1-1.5-3.5" strokeLinecap="round" />
-                            <path d="M13 1.5v3h-3" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                          Rescan Sessions
-                        </button>
+                            Clear Search
+                          </button>
+                        ) : (
+                          <button type="button" onClick={rescan} className="btn btn-ghost mt-3">
+                            <svg
+                              viewBox="0 0 16 16"
+                              className="h-3 w-3"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              aria-hidden="true"
+                            >
+                              <path d="M13 8a5 5 0 1 1-1.5-3.5" strokeLinecap="round" />
+                              <path d="M13 1.5v3h-3" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                            Rescan Sessions
+                          </button>
+                        )}
                       </div>
                     ) : (
                       <div
@@ -551,6 +764,10 @@ function Dashboard() {
                             source={sessionSource(s.id)}
                             onVolume={handleVolume}
                             onMute={handleMute}
+                            customName={persisted.renames[s.exe.toLowerCase()]}
+                            pinned={persisted.pinned.includes(s.id)}
+                            onTogglePin={() => togglePin(s.id)}
+                            onRename={(name) => renameChannel(s.exe, name)}
                           />
                         ))}
                       </div>
@@ -582,10 +799,25 @@ function Dashboard() {
 
                     {outputSessions.length === 0 ? (
                       <div className="rounded-lg border border-dashed border-rule/60 p-6 text-center">
-                        <p className="typo-caption text-ink-300">No active playback audio sessions detected</p>
-                        <button type="button" onClick={rescan} className="btn btn-primary mt-2">
-                          Rescan Audio Sessions
-                        </button>
+                        <p className="typo-caption text-ink-300">
+                          {searchQuery ? `No channels match “${searchQuery}”` : "No active playback audio sessions detected"}
+                        </p>
+                        {searchQuery ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSearchQuery("");
+                              searchInputRef.current?.focus();
+                            }}
+                            className="btn btn-primary mt-2"
+                          >
+                            Clear Search
+                          </button>
+                        ) : (
+                          <button type="button" onClick={rescan} className="btn btn-primary mt-2">
+                            Rescan Audio Sessions
+                          </button>
+                        )}
                       </div>
                     ) : (
                       <div
@@ -600,6 +832,10 @@ function Dashboard() {
                             source={sessionSource(s.id)}
                             onVolume={handleVolume}
                             onMute={handleMute}
+                            customName={persisted.renames[s.exe.toLowerCase()]}
+                            pinned={persisted.pinned.includes(s.id)}
+                            onTogglePin={() => togglePin(s.id)}
+                            onRename={(name) => renameChannel(s.exe, name)}
                             onRoute={handleOpenWindowsRouting}
                           />
                         ))}

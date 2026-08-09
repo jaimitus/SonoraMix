@@ -185,3 +185,16 @@ pub async fn set_master_mute(muted: bool) -> Result<(), String> {
 pub fn open_windows_app_volume() -> Result<(), String> {
     wasapi::open_windows_app_volume_settings().map_err(|e| e.to_user_message())
 }
+
+/// Sets whether closing the main window minimizes to the tray (true)
+/// or fully quits the app (false).
+#[tauri::command]
+pub fn set_close_behavior(
+    state: tauri::State<'_, crate::CloseBehavior>,
+    minimize: bool,
+) -> Result<(), String> {
+    state
+        .0
+        .store(minimize, std::sync::atomic::Ordering::Relaxed);
+    Ok(())
+}

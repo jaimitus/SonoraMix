@@ -292,3 +292,56 @@ export function DbReadout({
     </span>
   );
 }
+
+/**
+ * Session peak-hold readout — tracks the loudest dBFS level seen this
+ * session and shows it until reset. Click to reset the hold.
+ */
+export function PeakHoldReadout({
+  source,
+  className,
+}: {
+  source: LevelSource;
+  className?: string;
+}) {
+  const ref = useRef<HTMLButtonElement | null>(null);
+  const sourceRef = useRef(source);
+  sourceRef.current = source;
+  const maxRef = useRef(0);
+
+  useEffect(() => {
+    let raf = 0;
+    let lastText = "";
+    const loop = () => {
+      const el = ref.current;
+      if (el) {
+        const v = clamp01(sourceRef.current().peak);
+        if (v > maxRef.current) maxRef.current = v;
+        const m = maxRef.current;
+        const text = m <= 0.0001 ? "−∞" : (20 * Math.log10(m)).toFixed(1);
+        if (text !== lastText) {
+          el.textContent = text;
+          lastText = text;
+        }
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  return (
+    <button
+      type="button"
+      ref={ref}
+      onClick={() => {
+        maxRef.current = 0;
+      }}
+      className={className}
+      title="Session peak (click to reset)"
+      aria-label="Session peak level, click to reset"
+    >
+      −∞
+    </button>
+  );
+}

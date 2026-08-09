@@ -18,6 +18,9 @@ mod audio;
 mod commands;
 mod error;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
 use audio::engine::AudioEngine;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
@@ -26,14 +29,30 @@ use tauri::{
 };
 use tracing::{debug, error, info};
 
+/// Runtime flag for the "minimize to tray on close" behavior.
+/// `true` (default) hides the window to the tray; `false` quits the app.
+#[derive(Clone)]
+pub struct CloseBehavior(pub Arc<AtomicBool>);
+
+impl Default for CloseBehavior {
+    fn default() -> Self {
+        // Default to minimize-to-tray (matches the historical behavior) —
+        // `#[derive(Default)]` on Arc<AtomicBool> would give `false` = quit.
+        Self(Arc::new(AtomicBool::new(true)))
+    }
+}
+
 /// Application entry point.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_autostart::Builder::new().build())
         .setup(|app| {
             info!("initializing SonoraMix v{}", app.package_info().version);
+
+            app.manage(CloseBehavior::default());
 
             // Initialize the audio engine with a handle to the app for events
             let engine = AudioEngine::start(Some(app.handle().clone()));
@@ -63,6 +82,7 @@ pub fn run() {
             commands::set_master_volume,
             commands::set_master_mute,
             commands::open_windows_app_volume,
+            commands::set_close_behavior,
         ])
         .run(tauri::generate_context!())
         .expect("fatal error while running SonoraMix runtime");
@@ -128,17 +148,23 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Sets up window event handlers for close-to-tray behavior.
+/// Sets up window event handlers for close behavior.
+/// Reads the runtime [`CloseBehavior`] flag: `true` hides to tray, `false` quits.
 fn setup_window_behavior(app: &tauri::App) {
+    let close_behavior = app.state::<CloseBehavior>().inner().clone();
     if let Some(window) = app.get_webview_window("main") {
         let win = window.clone();
         window.on_window_event(move |event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                if let Err(e) = win.hide() {
-                    error!("failed to hide window: {}", e);
+                if close_behavior.0.load(Ordering::Relaxed) {
+                    api.prevent_close();
+                    if let Err(e) = win.hide() {
+                        error!("failed to hide window: {}", e);
+                    } else {
+                        info!("window hidden to tray");
+                    }
                 } else {
-                    info!("window hidden to tray");
+                    info!("close requested with close-to-tray disabled — quitting");
                 }
             }
         });

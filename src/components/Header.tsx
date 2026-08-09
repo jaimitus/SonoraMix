@@ -15,6 +15,7 @@ interface HeaderProps {
   mode: EngineMode;
   streaming: boolean;
   onTray: () => void;
+  onOpenSettings: () => void;
   onCheckUpdates: () => void;
   checkingUpdates: boolean;
   downloading: boolean;
@@ -50,6 +51,7 @@ export default function Header({
   onToggleDevice,
   streaming,
   onTray,
+  onOpenSettings,
   onCheckUpdates,
   checkingUpdates,
   downloading,
@@ -148,6 +150,23 @@ export default function Header({
                 {streaming ? "WASAPI LIVE" : "WASAPI STANDBY"}
               </span>
             </div>
+
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="btn btn-ghost"
+              title="Settings"
+              aria-label="Open settings"
+            >
+              <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+                <circle cx="8" cy="8" r="2" />
+                <path
+                  d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+              <span className="hidden sm:inline text-[12px]">Settings</span>
+            </button>
 
             <button
               type="button"

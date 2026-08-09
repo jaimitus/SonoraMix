@@ -60,6 +60,9 @@ export interface AudioBridge {
   /** Open the Windows per-app volume/routing settings page */
   openWindowsAppVolume(): Promise<void>;
 
+  /** Set whether closing the window minimizes to tray (true) or quits (false) */
+  setCloseBehavior(minimize: boolean): Promise<void>;
+
   /** Clean up resources */
   dispose(): void;
 }
@@ -142,6 +145,10 @@ class TauriBridge implements AudioBridge {
 
   openWindowsAppVolume(): Promise<void> {
     return invoke<void>("open_windows_app_volume");
+  }
+
+  setCloseBehavior(minimize: boolean): Promise<void> {
+    return invoke<void>("set_close_behavior", { minimize });
   }
 
   onVumeter(callback: (frames: MeterFrame[]) => void): () => void {
