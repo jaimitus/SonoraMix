@@ -383,6 +383,63 @@ pub unsafe fn set_session_mute(
     Ok(())
 }
 
+/// Device-level meter handles for the default endpoints.
+pub struct DeviceMeters {
+    pub render: Option<IAudioMeterInformation>,
+    pub capture: Option<IAudioMeterInformation>,
+}
+
+/// Activates `IAudioMeterInformation` on the default render and capture
+/// endpoints so the meter thread can report the *device* level (what actually
+/// comes out of / goes into the hardware), independent of per-app sessions.
+/// Capture meters also show mic level even when no app holds an open session.
+///
+/// # Safety
+/// Caller must have an active COM apartment.
+pub unsafe fn acquire_default_device_meters() -> DeviceMeters {
+    unsafe {
+        let enumerator: IMMDeviceEnumerator = match CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) {
+            Ok(e) => e,
+            Err(_) => {
+                warn!("creating device enumerator for device meters failed");
+                return DeviceMeters {
+                    render: None,
+                    capture: None,
+                };
+            }
+        };
+
+        let activate = |flow: windows::Win32::Media::Audio::EDataFlow| -> Option<IAudioMeterInformation> {
+            let endpoint = enumerator.GetDefaultAudioEndpoint(flow, eMultimedia).ok()?;
+            endpoint.Activate(CLSCTX_ALL, None).ok()
+        };
+
+        DeviceMeters {
+            render: activate(eRender),
+            capture: activate(eCapture),
+        }
+    }
+}
+
+/// Reads the current peak levels of a device-level meter.
+///
+/// # Safety
+/// Caller must have an active COM apartment.
+pub unsafe fn read_device_meter(meter: &IAudioMeterInformation) -> Option<MeterSample> {
+    unsafe {
+        let peak = meter.GetPeakValue().ok()?;
+        let channels = meter.GetMeteringChannelCount().ok().unwrap_or(1).min(8) as usize;
+        let mut levels = [0f32; 8];
+        let mut left = peak;
+        let mut right = peak;
+        if channels >= 1 && meter.GetChannelsPeakValues(&mut levels[..channels]).is_ok() {
+            left = levels[0];
+            right = if channels >= 2 { levels[1] } else { levels[0] };
+        }
+        Some(MeterSample { peak, left, right })
+    }
+}
+
 pub unsafe fn read_meter(entry: &SessionEntry) -> Option<MeterSample> {
     // Check ACTUAL mute state from COM interface (not the stale cached value,
     // since the meter thread has its own session cache that doesn't get mute updates).

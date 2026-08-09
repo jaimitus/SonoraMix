@@ -22,6 +22,7 @@ import type { Update } from "@tauri-apps/plugin-updater";
 import { disable as disableAutostart, enable as enableAutostart } from "@tauri-apps/plugin-autostart";
 import { register as registerShortcut, unregister as unregisterShortcut } from "@tauri-apps/plugin-global-shortcut";
 import { LogicalPosition, LogicalSize, getCurrentWindow } from "@tauri-apps/api/window";
+import DeviceMeters from "./components/DeviceMeters";
 import Header from "./components/Header";
 import SessionCard from "./components/SessionCard";
 import SettingsDrawer from "./components/SettingsDrawer";
@@ -178,6 +179,9 @@ function Dashboard() {
 
   const sessionSource = useCallback((id: string): LevelSource => () => levelsRef.current.get(id) ?? ZERO_LEVEL, []);
   const masterSource = useCallback<LevelSource>(() => masterRef.current, []);
+  // Device-level bus meters (ids emitted by the Rust meter thread as "device:*").
+  const deviceOutSource = useCallback<LevelSource>(() => levelsRef.current.get("device:render") ?? ZERO_LEVEL, []);
+  const deviceInSource = useCallback<LevelSource>(() => levelsRef.current.get("device:capture") ?? ZERO_LEVEL, []);
 
   // Keep the meter-scaling refs in sync with the master control state.
   useEffect(() => {
@@ -375,6 +379,8 @@ function Dashboard() {
           let sumSq = 0, sumL = 0, sumR = 0;
           for (const f of frames) {
             levelsRef.current.set(f.id, { peak: f.peak, left: f.left, right: f.right, ts: now });
+            // Device bus meters are not sessions — exclude from the master sum.
+            if (f.id.startsWith("device:")) continue;
             sumSq += f.peak * f.peak;
             sumL += f.left * f.left;
             sumR += f.right * f.right;
@@ -728,6 +734,22 @@ function Dashboard() {
             </div>
           ) : (
             <>
+              {/* 📟 DEVICE BUS METERS — actual hardware level */}
+              <DeviceMeters
+                outputSource={deviceOutSource}
+                inputSource={deviceInSource}
+                outputName={
+                  devices.find((d) => d.id === outputDeviceId)?.name ??
+                  devices.find((d) => d.flow !== "capture")?.name ??
+                  ""
+                }
+                inputName={
+                  devices.find((d) => d.id === inputDeviceId)?.name ??
+                  devices.find((d) => d.flow === "capture")?.name ??
+                  ""
+                }
+                outputMuted={master.muted}
+              />
               {/* 🎙️ INPUT CONSOLE RACK (Microphones & Recording) */}
               {(filterTab === "all" || filterTab === "capture") && (
                 <section className="glass-panel rounded-xl overflow-hidden relative" aria-label="Input recording console">

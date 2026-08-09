@@ -440,6 +440,10 @@ fn meter_loop(app: AppHandle, stop: Arc<AtomicBool>, telemetry: Telemetry) {
     };
 
     let mut cache: Vec<SessionEntry> = Vec::new();
+    let mut device_meters = wasapi::DeviceMeters {
+        render: None,
+        capture: None,
+    };
     let mut refreshed_at = Instant::now() - Duration::from_secs(60);
 
     // Phase-locked 60 Hz cadence (16.666ms)
@@ -459,10 +463,11 @@ fn meter_loop(app: AppHandle, stop: Arc<AtomicBool>, telemetry: Telemetry) {
                     warn!("meter cache refresh failed: {}", e);
                 }
             }
+            device_meters = unsafe { wasapi::acquire_default_device_meters() };
             refreshed_at = Instant::now();
         }
 
-        let mut frames: Vec<MeterFrame> = Vec::with_capacity(cache.len());
+        let mut frames: Vec<MeterFrame> = Vec::with_capacity(cache.len() + 2);
         for entry in &cache {
             if let Some(sample) = unsafe { wasapi::read_meter(entry) } {
                 frames.push(MeterFrame {
@@ -473,6 +478,31 @@ fn meter_loop(app: AppHandle, stop: Arc<AtomicBool>, telemetry: Telemetry) {
                     right: sample.right,
                 });
             }
+        }
+
+        // Device-level bus meters (default endpoints) — the real hardware level.
+        // Frontend distinguishes these by the "device:" id prefix. When the read
+        // fails (device unplugged/disabled), emit a zeroed frame so the UI goes
+        // silent instead of freezing on the last level.
+        if let Some(render) = &device_meters.render {
+            let sample = unsafe { wasapi::read_device_meter(render) };
+            frames.push(MeterFrame {
+                id: "device:render".to_string(),
+                pid: 0,
+                peak: sample.as_ref().map_or(0.0, |s| s.peak),
+                left: sample.as_ref().map_or(0.0, |s| s.left),
+                right: sample.as_ref().map_or(0.0, |s| s.right),
+            });
+        }
+        if let Some(capture) = &device_meters.capture {
+            let sample = unsafe { wasapi::read_device_meter(capture) };
+            frames.push(MeterFrame {
+                id: "device:capture".to_string(),
+                pid: 0,
+                peak: sample.as_ref().map_or(0.0, |s| s.peak),
+                left: sample.as_ref().map_or(0.0, |s| s.left),
+                right: sample.as_ref().map_or(0.0, |s| s.right),
+            });
         }
 
         let emit_started = Instant::now();
