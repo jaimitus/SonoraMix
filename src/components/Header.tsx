@@ -88,6 +88,8 @@ export default function Header({
                   <span>🔊</span> Output
                 </span>
                 <select
+                  id="header-output-device"
+                  name="output-device"
                   value={outputDeviceId}
                   onChange={(e) => onOutputDevice(e.target.value)}
                   aria-label="Select audio playback output device"
@@ -108,6 +110,8 @@ export default function Header({
                   <span>🎙️</span> Mic
                 </span>
                 <select
+                  id="header-input-device"
+                  name="input-device"
                   value={inputDeviceId}
                   onChange={(e) => onInputDevice(e.target.value)}
                   aria-label="Select microphone recording device"

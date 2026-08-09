@@ -826,6 +826,8 @@ function Dashboard() {
               {/* Channel search (Ctrl+F) */}
               <div className="relative">
                 <input
+                  id="channel-search"
+                  name="channel-search"
                   ref={searchInputRef}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
