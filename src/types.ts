@@ -26,6 +26,8 @@ export interface AudioSessionInfo {
   channels: number;
   /** Audio flow direction: "render" (Playback) or "capture" (Microphone Input) */
   flow: "render" | "capture";
+  /** Session state: "active" (streaming) | "inactive" (held/standby) | "expired" */
+  state: "active" | "inactive" | "expired";
 }
 
 /**

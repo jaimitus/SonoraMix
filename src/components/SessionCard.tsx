@@ -110,15 +110,33 @@ export default function SessionCard({
             >
               {displayName}
             </h3>
-            {session.flow === "capture" ? (
-              <span className="shrink-0 rounded px-1 py-0.2 text-[8px] font-bold tracking-wider uppercase text-route bg-route/15 border border-route/30">
-                MIC
-              </span>
-            ) : (
-              <span className="shrink-0 rounded px-1 py-0.2 text-[8px] font-bold tracking-wider uppercase text-signal bg-signal/15 border border-signal/30">
-                OUT
-              </span>
-            )}
+            <div className="flex shrink-0 items-center gap-1">
+              {session.flow === "capture" ? (
+                <span className="rounded px-1 py-0.2 text-[8px] font-bold tracking-wider uppercase text-route bg-route/15 border border-route/30">
+                  MIC
+                </span>
+              ) : (
+                <span className="rounded px-1 py-0.2 text-[8px] font-bold tracking-wider uppercase text-signal bg-signal/15 border border-signal/30">
+                  OUT
+                </span>
+              )}
+              {session.flow === "capture" && (
+                <span
+                  title={
+                    session.state === "active"
+                      ? "Actively capturing audio"
+                      : "Held by the app but silent — start talking or recording to see it go LIVE"
+                  }
+                  className={`rounded px-1 py-0.2 text-[8px] font-bold tracking-wider uppercase ${
+                    session.state === "active"
+                      ? "text-led-green bg-led-green/10 border border-led-green/30"
+                      : "text-led-amber bg-led-amber/10 border border-led-amber/30"
+                  }`}
+                >
+                  {session.state === "active" ? "LIVE" : "STANDBY"}
+                </span>
+              )}
+            </div>
           </div>
           <p className="truncate font-mono text-[9px] text-ink-500">
             {session.exe} · PID {pid}

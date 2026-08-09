@@ -59,6 +59,7 @@ pub struct SessionInfo {
     pub muted: bool,
     pub channels: u32,
     pub flow: String, // "render" | "capture"
+    pub state: String, // "active" | "inactive" | "expired"
 }
 
 /// Serializable audio endpoint information.
@@ -103,6 +104,7 @@ struct RawSession {
     muted_val: bool,
     channels: u32,
     flow: String,
+    state: String,
 }
 
 /// Meter sample with per-channel peaks.
@@ -233,6 +235,7 @@ pub unsafe fn collect_sessions() -> SonoraResult<Vec<SessionEntry>> {
         let flow = raws[0].flow.clone();
         let main_vol = raws[0].vol_val;
         let main_muted = raws[0].muted_val;
+        let main_state = raws[0].state.clone();
         let max_channels = raws.iter().map(|r| r.channels).max().unwrap_or(1);
 
         let mut volumes = Vec::with_capacity(raws.len());
@@ -253,6 +256,7 @@ pub unsafe fn collect_sessions() -> SonoraResult<Vec<SessionEntry>> {
                 muted: main_muted,
                 channels: max_channels,
                 flow,
+                state: main_state,
             },
             exe_path,
             volumes,
@@ -281,6 +285,11 @@ unsafe fn build_raw_session(control: &IAudioSessionControl, self_pid: u32) -> Op
         if state == AudioSessionStateExpired {
             return None;
         }
+        let state_str = match state {
+            AudioSessionStateActive => "active",
+            AudioSessionStateInactive => "inactive",
+            _ => "expired",
+        };
 
         let volume: ISimpleAudioVolume = control.cast().ok()?;
         let meter: IAudioMeterInformation = control.cast().ok()?;
@@ -306,6 +315,7 @@ unsafe fn build_raw_session(control: &IAudioSessionControl, self_pid: u32) -> Op
             muted_val,
             channels,
             flow: "render".to_string(),
+            state: state_str.to_string(),
         })
     }
 }

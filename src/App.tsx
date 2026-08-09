@@ -461,8 +461,26 @@ function Dashboard() {
 
                     {inputSessions.length === 0 ? (
                       <div className="rounded-lg border border-dashed border-rule/60 p-6 text-center">
-                        <p className="typo-caption text-ink-300">No active microphone capture sessions detected</p>
-                        <p className="text-[11px] text-ink-500 mt-1">Open Discord, OBS Studio, Teams, or Zoom to control microphone levels</p>
+                        <p className="typo-caption text-ink-300">No microphone channels detected</p>
+                        <p className="mx-auto mt-1 max-w-md text-[11px] leading-relaxed text-ink-500">
+                          Windows only creates mic channels while an app is actually using the
+                          microphone — in a Discord call, OBS recording or voice chat. Start using
+                          your mic and the channel appears here automatically.
+                        </p>
+                        <button type="button" onClick={rescan} className="btn btn-ghost mt-3">
+                          <svg
+                            viewBox="0 0 16 16"
+                            className="h-3 w-3"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                            aria-hidden="true"
+                          >
+                            <path d="M13 8a5 5 0 1 1-1.5-3.5" strokeLinecap="round" />
+                            <path d="M13 1.5v3h-3" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                          Rescan Sessions
+                        </button>
                       </div>
                     ) : (
                       <div
