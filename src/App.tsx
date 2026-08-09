@@ -656,6 +656,19 @@ function Dashboard() {
       .catch((e) => showToast("error", "Open Failed", String(e)));
   }, [showToast]);
 
+  // Route a single app session to an output device WITHOUT leaving SonoraMix
+  // (persisted per-app default via Windows.Media.Internal.AudioPolicyConfig).
+  const handleRouteSession = useCallback(
+    (session: AudioSessionInfo, deviceId: string) => {
+      const devName = devices.find((d) => d.id === deviceId)?.name ?? deviceId;
+      bridgeRef.current
+        ?.routeSessionDevice(session.pid, session.exe, deviceId)
+        .then(() => showToast("ok", "App Routed", `${getDisplayName(session.exe)} → ${devName}`))
+        .catch((e) => showToast("error", "Routing Failed", String(e)));
+    },
+    [devices, showToast],
+  );
+
   const handleToggleDevice = useCallback(
     (deviceId: string, enabled: boolean) => {
       const b = bridgeRef.current;
@@ -831,8 +844,8 @@ function Dashboard() {
               />
               {/* 🎙️ INPUT CONSOLE RACK (Microphones & Recording) */}
               {(filterTab === "all" || filterTab === "capture") && (
-                <section className="glass-panel rounded-xl overflow-hidden relative" aria-label="Input recording console">
-                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-route" aria-hidden="true" />
+                <section className="glass-panel rounded-xl relative" aria-label="Input recording console">
+                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-route rounded-l-xl" aria-hidden="true" />
                   <div className="ml-1.5 px-5 pt-4 pb-5 sm:px-6">
                     <div className="mb-3.5 flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
@@ -915,8 +928,8 @@ function Dashboard() {
 
               {/* 🔊 OUTPUT CONSOLE RACK (Application Playback & Music) */}
               {(filterTab === "all" || filterTab === "render") && (
-                <section className="glass-panel rounded-xl overflow-hidden relative" aria-label="Output playback console">
-                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-signal" aria-hidden="true" />
+                <section className="glass-panel rounded-xl relative" aria-label="Output playback console">
+                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-signal rounded-l-xl" aria-hidden="true" />
                   <div className="ml-1.5 px-5 pt-4 pb-5 sm:px-6">
                     <div className="mb-3.5 flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
@@ -973,6 +986,8 @@ function Dashboard() {
                             pinned={persisted.pinned.includes(s.id)}
                             onTogglePin={() => togglePin(s.id)}
                             onRename={(name) => renameChannel(s.exe, name)}
+                            renderDevices={devices.filter((d) => d.flow !== "capture")}
+                            onRouteToDevice={(deviceId) => handleRouteSession(s, deviceId)}
                             onRoute={handleOpenWindowsRouting}
                           />
                         ))}

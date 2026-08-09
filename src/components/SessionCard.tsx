@@ -7,8 +7,8 @@
  *   - Center: Vertical Fader (76px) | dB Scale (28px) | Dual Stereo PPM Meter (76px)
  *   - Bottom: Mute Toggle + peak-hold + live dBFS readout
  */
-import { useMemo, useRef, useState } from "react";
-import type { AudioSessionInfo, LevelSource } from "../types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { AudioDeviceInfo, AudioSessionInfo, LevelSource } from "../types";
 import { getDisplayName } from "../utils/names";
 import Fader from "./Fader";
 import VumeterCanvas, { DbReadout, PeakHoldReadout } from "./VumeterCanvas";
@@ -26,7 +26,11 @@ interface SessionCardProps {
   onTogglePin?: () => void;
   /** Commit a new display name (empty to revert to default) */
   onRename?: (name: string) => void;
-  /** Optional: opens the Windows per-app output routing page (render sessions only) */
+  /** Output endpoints available for in-app per-app routing (render sessions only) */
+  renderDevices?: AudioDeviceInfo[];
+  /** Route this session to an output device, in-app (no Windows settings needed) */
+  onRouteToDevice?: (deviceId: string) => void;
+  /** Optional fallback: opens the Windows per-app output routing page */
   onRoute?: () => void;
 }
 
@@ -42,6 +46,8 @@ export default function SessionCard({
   pinned,
   onTogglePin,
   onRename,
+  renderDevices,
+  onRouteToDevice,
   onRoute,
 }: SessionCardProps) {
   const mutedRef = useRef(session.muted);
@@ -50,6 +56,29 @@ export default function SessionCard({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const editingRef = useRef(false);
+
+  // In-app per-app routing picker state (render sessions only).
+  const [routeOpen, setRouteOpen] = useState(false);
+  const routeRef = useRef<HTMLDivElement | null>(null);
+
+  // Close the routing picker on outside click / Escape.
+  useEffect(() => {
+    if (!routeOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (routeRef.current && !routeRef.current.contains(e.target as Node)) {
+        setRouteOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setRouteOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [routeOpen]);
 
   const displayName = customName || getDisplayName(session.exe);
   const hue = useMemo(() => hueOf(session.pid), [session.pid]);
@@ -242,18 +271,88 @@ export default function SessionCard({
         </button>
 
         <div className="flex items-center gap-1.5">
-          {session.flow === "render" && onRoute && (
-            <button
-              type="button"
-              onClick={onRoute}
-              title={`Set ${displayName}'s output device in Windows… (per-app routing lives there)`}
-              aria-label={`Route ${displayName} output in Windows`}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-ink-800/80 text-ink-300 border border-rule/50 transition-all hover:bg-ink-700 hover:text-ink-100 hover:border-signal/40"
-            >
-              <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-                <path d="M2 8h12M9 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
+          {session.flow === "render" && (onRouteToDevice || onRoute) && (
+            <div ref={routeRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setRouteOpen((o) => !o)}
+                aria-expanded={routeOpen}
+                aria-haspopup="menu"
+                title={`Route ${displayName} to an output device`}
+                aria-label={`Route ${displayName} output`}
+                className={`inline-flex h-7 w-7 items-center justify-center rounded-md bg-ink-800/80 text-ink-300 border transition-all hover:bg-ink-700 hover:text-ink-100 ${
+                  routeOpen ? "border-signal/60 text-signal" : "border-rule/50 hover:border-signal/40"
+                }`}
+              >
+                <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                  <path d="M2 8h12M9 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+
+              {routeOpen && (
+                <div
+                  role="menu"
+                  className="absolute top-full right-0 z-30 mt-1.5 w-[228px] rounded-lg border border-rule bg-panel-1/95 p-1.5 shadow-[0_16px_40px_rgba(0,0,0,0.55)] backdrop-blur-sm"
+                  style={{ animation: "fade-in 0.14s ease both" }}
+                >
+                  <p className="px-2 pt-1 pb-1.5 text-[9px] font-bold uppercase tracking-widest text-ink-500">
+                    Route {displayName} to…
+                  </p>
+                  <div className="max-h-[210px] overflow-y-auto pr-0.5">
+                    {renderDevices && renderDevices.length > 0 ? (
+                      renderDevices.map((dev) => (
+                        <button
+                          key={dev.id}
+                          type="button"
+                          role="menuitem"
+                          disabled={!dev.enabled}
+                          onClick={() => {
+                            setRouteOpen(false);
+                            onRouteToDevice?.(dev.id);
+                          }}
+                          title={dev.enabled ? dev.name : `${dev.name} (disabled — enable it first)`}
+                          className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
+                            dev.enabled
+                              ? "text-ink-200 hover:bg-ink-800 hover:text-ink-100"
+                              : "cursor-not-allowed text-ink-500 opacity-60"
+                          }`}
+                        >
+                          <span
+                            className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                              dev.enabled ? "bg-led-green" : "bg-led-red"
+                            }`}
+                            aria-hidden="true"
+                          />
+                          <span className="min-w-0 flex-1 truncate">{dev.name}</span>
+                          <span className="shrink-0 text-[8px] text-ink-500">{dev.formFactor}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <p className="px-2 py-1.5 text-[10px] text-ink-500">No output devices found</p>
+                    )}
+                  </div>
+                  {onRoute && (
+                    <>
+                      <div className="my-1 border-t border-rule/50" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setRouteOpen(false);
+                          onRoute();
+                        }}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[10px] text-route transition-colors hover:bg-ink-800"
+                      >
+                        <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                          <path d="M3.5 3.5h6a2 2 0 0 1 2 2v4M12.5 10.5 15 8l-2.5-2.5M3.5 12.5h6a2 2 0 0 0 2-2V2.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        Open Windows per-app settings…
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           )}
           {session.flow === "render" && (
             <span className="flex items-center gap-1 font-mono text-[8px] text-ink-500 bg-ink-950/80 px-1.5 py-1 rounded border border-rule/30">

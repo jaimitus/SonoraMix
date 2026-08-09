@@ -14,7 +14,7 @@ use std::mem::size_of;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use tracing::{debug, info, trace, warn};
-use windows::core::{Interface, GUID, HRESULT, PCWSTR, PWSTR, IUnknown};
+use windows::core::{HSTRING, Interface, GUID, HRESULT, PCWSTR, PWSTR, IUnknown};
 use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{CloseHandle, BOOL, HWND};
 use windows::Win32::Graphics::Gdi::{
@@ -32,6 +32,9 @@ use windows::Win32::Media::Audio::{
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_MULTITHREADED,
     STGM_READ,
+};
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -724,6 +727,228 @@ pub fn open_windows_app_volume_settings() -> SonoraResult<()> {
         .spawn()
         .map_err(|e| SonoraError::Internal(format!("launching app volume settings: {}", e)))?;
     info!("opened Windows app volume settings page");
+    Ok(())
+}
+
+// =============================================================================
+// Per-App Endpoint Routing (IAudioPolicyConfigFactory)
+// =============================================================================
+//
+// Windows exposes per-app output routing through the (undocumented)
+// `Windows.Media.Internal.AudioPolicyConfig` WinRT class — the same mechanism
+// the "App volume and device preferences" page uses. We call it directly so
+// users can route a session to any output device without leaving SonoraMix.
+//
+// Reference implementation: EarTrumpet's `AudioPolicyConfigFactory`.
+// The activation factory exposes two IIDs depending on the OS version
+// (Win11 21H2+ vs older Win10) with an identical vtable layout.
+
+const IID_AUDIO_POLICY_CONFIG_21H2: GUID = GUID::from_u128(0xab3d4648_e242_459f_b02f_541c70306324);
+const IID_AUDIO_POLICY_CONFIG_DOWNLEVEL: GUID = GUID::from_u128(0x2a59116d_6c4f_45e0_a74f_707e3fef9258);
+
+/// Suffixes appended to a raw MMDevice id to build the full endpoint id the
+/// policy factory expects (matches EarTrumpet's `GenerateDeviceId`).
+/// (Rendering sessions are the only routable ones on modern Windows, so the
+/// capture suffix is kept for reference but not referenced at runtime.)
+const DEVINTERFACE_AUDIO_RENDER: &str = "#{e6327cad-dcec-4949-ae8a-991e976a79d2}";
+#[allow(dead_code)]
+const DEVINTERFACE_AUDIO_CAPTURE: &str = "#{2eef81be-33fa-4800-9670-1cd474972c3f}";
+
+// `RoGetActivationFactory` (api-ms-win-core-winrt-l1-1-0.dll). Declared here
+// because the `windows` crate only exposes the generic `RoGetActivationFactory<T>`
+// which requires a statically-known interface type.
+#[link(name = "api-ms-win-core-winrt-l1-1-0.dll")]
+unsafe extern "system" {
+    fn RoGetActivationFactory(
+        activatable_class_id: *const core::ffi::c_void, // HSTRING (by value)
+        class_id: *const GUID,
+        factory: *mut *mut core::ffi::c_void,
+    ) -> HRESULT;
+}
+
+/// Vtable of `Windows.Media.Internal.AudioPolicyConfig`.
+/// Layout (matching EarTrumpet's interface declaration):
+///   IUnknown (3) + IInspectable GetIids/GetRuntimeClassName/GetTrustLevel (3)
+///   + 19 volume-group/chat methods (never called) + SetPersistedDefaultAudioEndpoint
+/// `SetPersistedDefaultAudioEndpoint` therefore sits at slot 25.
+#[repr(C)]
+#[allow(non_snake_case)]
+struct AudioPolicyConfigVtbl {
+    QueryInterface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+    AddRef: unsafe extern "system" fn(*mut c_void) -> u32,
+    Release: unsafe extern "system" fn(*mut c_void) -> u32,
+    /// Slots 3–24 (IInspectable 3 methods + 19 internal methods). Unused.
+    __reserved: [unsafe extern "system" fn(*mut c_void) -> HRESULT; 22],
+    /// Slot 25: `HRESULT SetPersistedDefaultAudioEndpoint(UINT32 processId, EDataFlow flow, ERole role, HSTRING deviceId)`
+    SetPersistedDefaultAudioEndpoint:
+        unsafe extern "system" fn(*mut c_void, u32, i32, i32, *const c_void) -> HRESULT,
+}
+
+struct AudioPolicyConfig {
+    raw: *mut c_void,
+}
+
+impl AudioPolicyConfig {
+    /// Activates `Windows.Media.Internal.AudioPolicyConfig`, trying the Win11
+    /// 21H2+ IID first and falling back to the downlevel (Win10) IID.
+    fn activate() -> SonoraResult<Self> {
+        ensure_com_init();
+        unsafe {
+            let class_name = HSTRING::from("Windows.Media.Internal.AudioPolicyConfig");
+            let mut raw: *mut c_void = std::ptr::null_mut();
+
+            let mut hr = RoGetActivationFactory(
+                core::mem::transmute_copy(&class_name),
+                &IID_AUDIO_POLICY_CONFIG_21H2,
+                &mut raw,
+            );
+            if hr.is_err() || raw.is_null() {
+                hr = RoGetActivationFactory(
+                    core::mem::transmute_copy(&class_name),
+                    &IID_AUDIO_POLICY_CONFIG_DOWNLEVEL,
+                    &mut raw,
+                );
+            }
+
+            if hr.is_err() || raw.is_null() {
+                return Err(SonoraError::Routing(format!(
+                    "activating audio policy config failed: {:?}",
+                    hr
+                )));
+            }
+
+            Ok(Self { raw })
+        }
+    }
+
+    /// Slot 25 call: persist `device_id` (full SWD endpoint id) as the default
+    /// output for `process_id` in the given role (eMultimedia = 1, eConsole = 0).
+    unsafe fn set_persisted_default_endpoint(
+        &self,
+        process_id: u32,
+        device_id: &HSTRING,
+        role: i32,
+    ) -> SonoraResult<()> {
+        unsafe {
+            let vtbl = *(self.raw as *const *const AudioPolicyConfigVtbl);
+            let hr = ((*vtbl).SetPersistedDefaultAudioEndpoint)(
+                self.raw,
+                process_id,
+                0, // EDataFlow.eRender
+                role,
+                core::mem::transmute_copy(device_id),
+            );
+            if hr.is_err() {
+                return Err(SonoraError::Routing(format!(
+                    "SetPersistedDefaultAudioEndpoint failed: {:?}",
+                    hr
+                )));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for AudioPolicyConfig {
+    fn drop(&mut self) {
+        if !self.raw.is_null() {
+            unsafe {
+                let vtbl = *(self.raw as *const *const AudioPolicyConfigVtbl);
+                ((*vtbl).Release)(self.raw);
+            }
+        }
+    }
+}
+
+/// Returns every live process id whose full image path equals `target_path`
+/// (case-insensitive). Used to route all instances of a multi-process app
+/// (e.g. Chrome with one session per tab) to the same output device.
+fn all_processes_with_image_path(target_path: &str) -> Vec<u32> {
+    let target_norm = target_path.to_lowercase();
+    let mut out = Vec::new();
+
+    unsafe {
+        let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            warn!("process snapshot failed for routing");
+            return out;
+        };
+        let _guard = ProcessHandle(snapshot);
+
+        let mut entry = PROCESSENTRY32W::default();
+        entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
+
+        if Process32FirstW(snapshot, &mut entry).is_err() {
+            return out;
+        }
+        loop {
+            let pid = entry.th32ProcessID;
+            if pid != 0 {
+                if let Ok(path) = process_image_path(pid) {
+                    if path.to_lowercase() == target_norm {
+                        out.push(pid);
+                    }
+                }
+            }
+            if Process32NextW(snapshot, &mut entry).is_err() {
+                break;
+            }
+        }
+    }
+
+    out
+}
+
+/// Routes an application (every process sharing its executable) to a specific
+/// output endpoint, persisting the per-app default — the same mechanism the
+/// Windows "App volume and device preferences" page uses, so routing never
+/// requires leaving SonoraMix.
+///
+/// `expected_exe` guards against pid reuse: if the process behind `pid` died
+/// and the OS recycled its id, its image path won't match the session's exe and
+/// we abort instead of routing an unrelated app.
+pub fn route_session_to_endpoint(
+    pid: u32,
+    expected_exe: &str,
+    device_id: &str,
+) -> SonoraResult<()> {
+    ensure_com_init();
+
+    let exe_path = process_image_path(pid)
+        .map_err(|e| SonoraError::Routing(format!("resolving process {}: {}", pid, e)))?;
+    let exe = exe_path
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or_default();
+    if !exe.eq_ignore_ascii_case(expected_exe) {
+        return Err(SonoraError::Routing(format!(
+            "pid {} no longer belongs to {} (recycled?)",
+            pid, expected_exe
+        )));
+    }
+
+    let pids = all_processes_with_image_path(&exe_path);
+    if pids.is_empty() {
+        return Err(SonoraError::Routing(format!(
+            "no running processes match {}",
+            exe_path
+        )));
+    }
+
+    let factory = AudioPolicyConfig::activate()?;
+    let full_id = format!(
+        "\\\\?\\SWD#MMDEVAPI#{}{}",
+        device_id, DEVINTERFACE_AUDIO_RENDER
+    );
+    let device = HSTRING::from(&full_id);
+
+    for process_id in pids {
+        unsafe {
+            factory.set_persisted_default_endpoint(process_id, &device, 1)?; // eMultimedia
+            factory.set_persisted_default_endpoint(process_id, &device, 0)?; // eConsole
+        }
+    }
+
+    info!("routed {} (pid {}) to endpoint {}", exe_path, pid, device_id);
     Ok(())
 }
 

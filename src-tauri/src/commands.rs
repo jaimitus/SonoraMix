@@ -186,6 +186,24 @@ pub fn open_windows_app_volume() -> Result<(), String> {
     wasapi::open_windows_app_volume_settings().map_err(|e| e.to_user_message())
 }
 
+/// Routes an application (all processes sharing its executable) to a specific
+/// output endpoint without leaving SonoraMix — the same persisted per-app
+/// default the Windows settings page writes, via
+/// `Windows.Media.Internal.AudioPolicyConfig`.
+///
+/// `exe` is the expected executable filename of `pid`; it guards against pid
+/// reuse (a pid captured in a stale session list may have been recycled by a
+/// different process before the user clicks Route).
+#[tauri::command]
+pub async fn route_session_device(
+    pid: u32,
+    exe: String,
+    device_id: String,
+) -> Result<(), String> {
+    wasapi::ensure_com_init();
+    wasapi::route_session_to_endpoint(pid, &exe, &device_id).map_err(|e| e.to_user_message())
+}
+
 /// Sets whether closing the main window minimizes to the tray (true)
 /// or fully quits the app (false).
 #[tauri::command]
