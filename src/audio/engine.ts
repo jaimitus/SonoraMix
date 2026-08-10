@@ -291,6 +291,11 @@ class MockBridge implements AudioBridge {
     ];
     this.routed.set("render:cs2.exe", "dev-headphones");
     this.routed.set("render:discord.exe", "dev-headphones");
+    // Mirror the TauriBridge: the native backend auto-starts the meter stream
+    // during init, so the demo must too — otherwise no frames are emitted, the
+    // meters stay frozen at −∞, the engine badge reads "standby" and mic-driven
+    // features (auto-duck) never engage.
+    await this.startStream();
     return { sessions: this.sessions, devices: this.devices };
   }
 
