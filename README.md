@@ -1,6 +1,6 @@
 # 🎛️ SonoraMix — Professional Windows WASAPI Audio Session Console
 
-[![Release](https://img.shields.io/badge/Release-v1.1.2-ff7940?style=for-the-badge&logo=github)](https://github.com/jaimitus/SonoraMix/releases/tag/v1.1.2)
+[![Release](https://img.shields.io/badge/Release-v1.2.0-ff7940?style=for-the-badge&logo=github)](https://github.com/jaimitus/SonoraMix/releases/tag/v1.2.0)
 [![License](https://img.shields.io/badge/License-MIT-33d1b8?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-0078d4?style=for-the-badge&logo=windows)](https://github.com/jaimitus/SonoraMix)
 [![WASAPI](https://img.shields.io/badge/Engine-Native%20WASAPI-3fe082?style=for-the-badge)](https://github.com/jaimitus/SonoraMix)
@@ -34,6 +34,13 @@
 - **🎛️ Console Redesign (v1.1.1)**: Rebuilt channel strips (wider 272px cards with zero text overflow), an always-visible **device routing bar** on every output channel, a **MASTER OUT card** that keeps the same footprint as the channels but stands apart with its own orange identity, and a vivid high-contrast VU palette.
 - **🎚️ Configurable VU Meters (v1.1.1)**: Tune your meters in Settings — 5 color presets (Vivid, Classic, Neon, Ice, Mono), custom per-zone colors (green/amber/red), brightness (50–150%), LED segment size (Compact/Standard/Large) and peak-hold visibility. All persisted across restarts.
 - **🧪 Browser Demo Mode (v1.1.1)**: Append `?demo=1` to the URL to preview the full console with synthetic channels and live meters in any browser — no WASAPI required.
+- **🎬 Scenes & Snapshots (v1.2.0)**: Save the complete mixer state (every fader level, mute, routing and master) as a named scene — then switch between "Gaming", "Music" or "Streaming" setups with a single click. No more re-mixing every time you change activity.
+- **🎚️ Per-Channel SOLO Button (v1.2.0)**: Real console-style solo — press SOLO on any channel and every other channel is attenuated and muted instantly (their own mute states are restored when you un-solo).
+- **🎤 Auto-Duck (v1.2.0)**: When your microphone level exceeds a threshold, SonoraMix automatically lowers the other apps' volume by a configurable amount (3–30 dB, with hysteresis so it doesn't flicker) — perfect for streaming while music plays.
+- **🔀 Multi-Select Faders (v1.2.0)**: <kbd>Ctrl</kbd>+click several channels and move a single fader — they all follow in parallel (relative delta). Group mute works too, with a selection toolbar showing the count.
+- **🖐️ Drag-to-Reorder Channels (v1.2.0)**: Grab the 6-dot grip on any channel and drag it where you want. The order persists across restarts.
+- **🌐 Español / i18n (v1.2.0)**: Full English/Spanish interface with a language picker in Settings (auto-detects your system language on first launch).
+- **💾 Export & Import Configuration (v1.2.0)**: Back up everything — settings, themes, shortcuts, scenes, channel order, renames and pins — to a JSON file, or restore it on any machine.
 - **🐛 Per-App Routing Fixes (v1.1.2)**: Routing now sticks — the channel bar no longer silently reverts to "System default" right after routing, and elevated apps (games with anti-cheat, admin tools) can be routed too: process verification uses the toolhelp snapshot (`szExeFile`) so no `OpenProcess` permission is required.
 - **📐 Fader dB Readout (v1.1.2)**: Every fader (channels and MASTER OUT) now shows its level in decibels (`−2.6 dB`, `−∞` at zero) under the percentage — just like real console hardware.
 - **🔴 Clearer Mute Buttons (v1.1.2)**: Buttons now say **MUTE** (with a red hover hint) when the channel is live and **MUTED** in solid red with white text when muted — no more confusing "UNMUTE" label.
@@ -45,7 +52,7 @@
 
 ```
 +-----------------------------------------------------------------------------------+
-|  SonoraMix v1.1.2 — STUDIO MIXING CONSOLE                                          |
+|  SonoraMix v1.2.0 — STUDIO MIXING CONSOLE                                          |
 |  [🔊 Output: Realtek Speakers ]   [🎙️ Mic: USB Microphone ]   [WASAPI LIVE] [⚙️]  |
 +-----------------------------------------------------------------------------------+
 |  [ 🎛️ DUAL CONSOLE ]            [ 🔊 OUTPUTS (4) ]            [ 🎙️ INPUTS (2) ]  |
@@ -70,15 +77,15 @@
 
 ---
 
-## 📦 Downloads & Releases (v1.1.2)
+## 📦 Downloads & Releases (v1.2.0)
 
-Grab the latest pre-compiled release for Windows 10/11 x64 on the [**Releases Page**](https://github.com/jaimitus/SonoraMix/releases/tag/v1.1.2):
+Grab the latest pre-compiled release for Windows 10/11 x64 on the [**Releases Page**](https://github.com/jaimitus/SonoraMix/releases/tag/v1.2.0):
 
 | Package | File | Size | Description |
 | :--- | :--- | :--- | :--- |
 | 🚀 **Standalone Portable** | [`sonoramix.exe`](https://github.com/jaimitus/SonoraMix/releases) | ~6 MB | Single executable, zero installation required. |
-| 📦 **NSIS Setup Installer** | [`SonoraMix_1.1.2_x64-setup.exe`](https://github.com/jaimitus/SonoraMix/releases) | ~2 MB | Standard Windows installer with Start Menu & Desktop shortcuts. |
-| 🛡️ **MSI Package** | [`SonoraMix_1.1.2_x64_en-US.msi`](https://github.com/jaimitus/SonoraMix/releases) | ~2.7 MB | Windows Installer package for enterprise deployment. |
+| 📦 **NSIS Setup Installer** | [`SonoraMix_1.2.0_x64-setup.exe`](https://github.com/jaimitus/SonoraMix/releases) | ~2 MB | Standard Windows installer with Start Menu & Desktop shortcuts. |
+| 🛡️ **MSI Package** | [`SonoraMix_1.2.0_x64_en-US.msi`](https://github.com/jaimitus/SonoraMix/releases) | ~2.7 MB | Windows Installer package for enterprise deployment. |
 
 > 💡 **Automatic updates require an installed package (NSIS or MSI).** The portable `sonoramix.exe` does not self-update — download the new portable from the Releases page instead.
 
@@ -120,8 +127,8 @@ npm run tauri build
 
 Binary outputs will be generated in:
 - Portable: `src-tauri/target/release/sonoramix.exe`
-- NSIS Setup: `src-tauri/target/release/bundle/nsis/SonoraMix_1.1.2_x64-setup.exe`
-- MSI: `src-tauri/target/release/bundle/msi/SonoraMix_1.1.2_x64_en-US.msi`
+- NSIS Setup: `src-tauri/target/release/bundle/nsis/SonoraMix_1.2.0_x64-setup.exe`
+- MSI: `src-tauri/target/release/bundle/msi/SonoraMix_1.2.0_x64_en-US.msi`
 
 ### Publishing a new update (maintainers)
 1. Bump the version in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `package.json`.
