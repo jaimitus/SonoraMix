@@ -4,6 +4,7 @@
  * Now shows disabled devices and allows enabling/disabling them.
  */
 import type { AudioDeviceInfo, EngineMode } from "../types";
+import { useT } from "../i18n";
 
 interface HeaderProps {
   devices: AudioDeviceInfo[];
@@ -57,6 +58,7 @@ export default function Header({
   downloading,
   updateAvailable,
 }: HeaderProps) {
+  const t = useT();
   const outputDevices = devices.filter((d) => d.flow !== "capture");
   const inputDevices = devices.filter((d) => d.flow === "capture");
 
@@ -74,7 +76,7 @@ export default function Header({
                 <p className="font-medium text-[15px] tracking-tight text-ink-100">
                   Sonora<span className="text-signal">Mix</span>
                 </p>
-                <p className="typo-caption mt-0.5">Audio Session Console</p>
+                <p className="typo-caption mt-0.5">{t("header.tagline")}</p>
               </div>
             </div>
 
@@ -85,7 +87,7 @@ export default function Header({
               {/* Output Playback Device Dropdown */}
               <div className="flex items-center gap-1.5">
                 <span className="typo-caption text-signal font-bold flex items-center gap-1">
-                  <span>🔊</span> Output
+                  <span>🔊</span> {t("header.output")}
                 </span>
                 <select
                   id="header-output-device"
@@ -107,7 +109,7 @@ export default function Header({
               {/* Input Microphone Device Dropdown */}
               <div className="flex items-center gap-1.5">
                 <span className="typo-caption text-route font-bold flex items-center gap-1">
-                  <span>🎙️</span> Mic
+                  <span>🎙️</span> {t("header.mic")}
                 </span>
                 <select
                   id="header-input-device"
@@ -151,7 +153,7 @@ export default function Header({
             >
               <span className={`led ${streaming ? "led-green" : "led-amber"}`} />
               <span className="text-[11px] font-medium text-ink-300">
-                {streaming ? "WASAPI LIVE" : "WASAPI STANDBY"}
+                {streaming ? t("header.wasapiLive") : t("header.wasapiStandby")}
               </span>
             </div>
 
@@ -169,7 +171,7 @@ export default function Header({
                   strokeLinecap="round"
                 />
               </svg>
-              <span className="hidden sm:inline text-[12px]">Settings</span>
+              <span className="hidden sm:inline text-[12px]">{t("header.settings")}</span>
             </button>
 
             <button
@@ -219,7 +221,7 @@ export default function Header({
                 </svg>
               )}
               <span className="hidden sm:inline text-[12px]">
-                {downloading ? "Updating…" : checkingUpdates ? "Checking…" : updateAvailable ? "Update" : "Updates"}
+                {downloading ? t("header.updating") : checkingUpdates ? t("header.checking") : updateAvailable ? t("header.update") : t("header.updates")}
               </span>
               {updateAvailable && <span className="led led-green led-pulse" aria-hidden="true" />}
             </button>
@@ -236,7 +238,7 @@ export default function Header({
                 <path d="M1.5 10h4l1.2 2h2.6l1.2-2h4" strokeLinejoin="round" />
                 <path d="M8 4v4M6.4 6.6L8 8.2l1.6-1.6" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              <span className="hidden sm:inline text-[12px]">Tray</span>
+              <span className="hidden sm:inline text-[12px]">{t("header.tray")}</span>
             </button>
           </div>
         </div>

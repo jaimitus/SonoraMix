@@ -6,6 +6,7 @@
  * even when no app currently holds an open capture session.
  */
 import type { LevelSource } from "../types";
+import { useT } from "../i18n";
 import VumeterCanvas, { DbReadout, PeakHoldReadout } from "./VumeterCanvas";
 
 interface DeviceMetersProps {
@@ -91,6 +92,7 @@ export default function DeviceMeters({
   inputName,
   outputMuted,
 }: DeviceMetersProps) {
+  const t = useT();
   return (
     <section className="glass-panel rounded-xl px-5 py-3.5" aria-label="Device bus meters">
       <div className="mb-2 flex items-center gap-2">
@@ -98,13 +100,13 @@ export default function DeviceMeters({
           📟
         </span>
         <h2 className="font-display text-[11px] font-bold tracking-widest text-ink-300">
-          DEVICE BUS METERS
+          {t("meters.title")}
         </h2>
-        <span className="typo-caption dim text-[8px]">actual hardware level — post device volume</span>
+        <span className="typo-caption dim text-[8px]">{t("meters.subtitle")}</span>
       </div>
       <div className="grid gap-x-6 gap-y-2.5 md:grid-cols-2">
-        <Row label="Output Device" name={outputName} source={outputSource} muted={outputMuted} accent="signal" />
-        <Row label="Input Device" name={inputName} source={inputSource} muted={false} accent="route" />
+        <Row label={t("meters.output")} name={outputName} source={outputSource} muted={outputMuted} accent="signal" />
+        <Row label={t("meters.input")} name={inputName} source={inputSource} muted={false} accent="route" />
       </div>
     </section>
   );

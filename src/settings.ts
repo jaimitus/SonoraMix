@@ -3,10 +3,15 @@
  *
  * Backed by `localStorage` (persists inside the Tauri WebView2 data dir and
  * in browser previews). Stores:
- *   - App settings (accent theme, close-to-tray, launch minimized, autostart)
+ *   - App settings (accent theme, close-to-tray, launch minimized, autostart,
+ *     language, auto-duck)
  *   - Pinned channel ids (pinned apps always sort first)
  *   - Custom channel names keyed by executable (e.g. "spotify.exe")
+ *   - Custom channel order (drag & drop)
+ *   - Saved scenes (full mixer snapshots)
  */
+
+import { detectLang, type Lang } from "./i18n";
 
 export type AccentId = "orange" | "emerald" | "ocean" | "blossom" | "violet" | "gold";
 
@@ -61,6 +66,22 @@ export const DEFAULT_METER_SETTINGS: MeterSettings = {
   showPeakHold: true,
 };
 
+/** Auto-duck: lower playback channels while the mic is hot. */
+export interface DuckSettings {
+  /** Master toggle */
+  enabled: boolean;
+  /** Mic level (0..1) above which ducking engages */
+  threshold: number;
+  /** How much to cut playback volume, in dB (positive, e.g. 12 = -12 dB) */
+  amountDb: number;
+}
+
+export const DEFAULT_DUCK_SETTINGS: DuckSettings = {
+  enabled: false,
+  threshold: 0.12,
+  amountDb: 12,
+};
+
 export interface AppSettings {
   /** Accent color theme applied to the whole console */
   accent: AccentId;
@@ -74,6 +95,21 @@ export interface AppSettings {
   shortcuts: Shortcuts;
   /** VU meter appearance */
   meters: MeterSettings;
+  /** UI language */
+  language: Lang;
+  /** Auto-duck playback when the mic level crosses the threshold */
+  ducking: DuckSettings;
+}
+
+/** One saved mixer snapshot: volumes/mutes per app + master + routes. */
+export interface SceneSnapshot {
+  id: string;
+  name: string;
+  createdAt: number;
+  /** Per-exe state (keyed by lowercase exe). "" volume means follow live. */
+  apps: Record<string, { volume: number; muted: boolean; route?: string }>;
+  /** Master strip state */
+  master?: { volume: number; muted: boolean };
 }
 
 export interface PersistedState {
@@ -82,6 +118,10 @@ export interface PersistedState {
   pinned: string[];
   /** Custom display names keyed by lowercase exe ("spotify.exe" -> "Spotify · Música") */
   renames: Record<string, string>;
+  /** Preferred channel order (lowercase exe keys, front = first) */
+  channelOrder: string[];
+  /** Saved mixer scenes */
+  scenes: SceneSnapshot[];
 }
 
 const STORAGE_KEY = "sonoramix.v1.1";
@@ -93,48 +133,84 @@ export const DEFAULT_SETTINGS: AppSettings = {
   autostart: false,
   shortcuts: DEFAULT_SHORTCUTS,
   meters: DEFAULT_METER_SETTINGS,
+  language: detectLang(),
+  ducking: DEFAULT_DUCK_SETTINGS,
 };
 
 const DEFAULTS: PersistedState = {
   settings: DEFAULT_SETTINGS,
   pinned: [],
   renames: {},
+  channelOrder: [],
+  scenes: [],
 };
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object";
+}
+
+/**
+ * Sanitize an arbitrary parsed backup/state object into a valid PersistedState.
+ * Used by `loadState` and by the config import feature (backup restore).
+ */
+export function sanitizeState(parsed: unknown): PersistedState {
+  const p = (isRecord(parsed) ? parsed : {}) as Partial<PersistedState>;
+  const parsedSettings = (isRecord(p.settings) ? p.settings : {}) as Partial<AppSettings>;
+  const savedMeters = (isRecord(parsedSettings.meters) ? parsedSettings.meters : {}) as Partial<MeterSettings>;
+  // Validate enumerations + numeric ranges so a hand-edited/corrupted saved
+  // state can never feed NaN into the canvas renderer.
+  const ledSize: LedSize = savedMeters.ledSize === "compact" || savedMeters.ledSize === "standard" || savedMeters.ledSize === "large"
+    ? savedMeters.ledSize
+    : DEFAULT_METER_SETTINGS.ledSize;
+  const brightness = typeof savedMeters.brightness === "number" && Number.isFinite(savedMeters.brightness)
+    ? Math.min(1.5, Math.max(0.5, savedMeters.brightness))
+    : DEFAULT_METER_SETTINGS.brightness;
+  const language = parsedSettings.language === "es" ? "es" : "en";
+  const duckRaw = (isRecord(parsedSettings.ducking) ? parsedSettings.ducking : {}) as Partial<DuckSettings>;
+  const duckThreshold = typeof duckRaw.threshold === "number" && Number.isFinite(duckRaw.threshold)
+    ? Math.min(1, Math.max(0, duckRaw.threshold))
+    : DEFAULT_DUCK_SETTINGS.threshold;
+  const duckAmountDb = typeof duckRaw.amountDb === "number" && Number.isFinite(duckRaw.amountDb)
+    ? Math.min(40, Math.max(0, duckRaw.amountDb))
+    : DEFAULT_DUCK_SETTINGS.amountDb;
+  const scenes = Array.isArray(p.scenes)
+    ? p.scenes.filter((s): s is SceneSnapshot => isRecord(s) && typeof s.name === "string" && isRecord(s.apps))
+    : [];
+  return {
+    settings: {
+      ...DEFAULT_SETTINGS,
+      ...parsedSettings,
+      language,
+      ducking: {
+        ...DEFAULT_DUCK_SETTINGS,
+        ...duckRaw,
+        threshold: duckThreshold,
+        amountDb: duckAmountDb,
+      },
+      // Deep-merge meters so partial/older saved states keep sane defaults.
+      meters: {
+        ...DEFAULT_METER_SETTINGS,
+        ...savedMeters,
+        ledSize,
+        brightness,
+        colors: {
+          ...DEFAULT_METER_SETTINGS.colors,
+          ...(isRecord(savedMeters.colors) ? savedMeters.colors : {}),
+        },
+      },
+    },
+    pinned: Array.isArray(p.pinned) ? p.pinned.filter((x): x is string => typeof x === "string") : [],
+    renames: isRecord(p.renames) ? (p.renames as Record<string, string>) : {},
+    channelOrder: Array.isArray(p.channelOrder) ? p.channelOrder.filter((x): x is string => typeof x === "string") : [],
+    scenes,
+  };
+}
 
 export function loadState(): PersistedState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return structuredClone(DEFAULTS);
-    const parsed = JSON.parse(raw) as Partial<PersistedState>;
-    const parsedSettings = (parsed.settings ?? {}) as Partial<AppSettings>;
-    const savedMeters = (parsedSettings.meters ?? {}) as Partial<MeterSettings>;
-    // Validate enumerations + numeric ranges so a hand-edited/corrupted saved
-    // state can never feed NaN into the canvas renderer.
-    const ledSize: LedSize = savedMeters.ledSize === "compact" || savedMeters.ledSize === "standard" || savedMeters.ledSize === "large"
-      ? savedMeters.ledSize
-      : DEFAULT_METER_SETTINGS.ledSize;
-    const brightness = typeof savedMeters.brightness === "number" && Number.isFinite(savedMeters.brightness)
-      ? Math.min(1.5, Math.max(0.5, savedMeters.brightness))
-      : DEFAULT_METER_SETTINGS.brightness;
-    return {
-      settings: {
-        ...DEFAULT_SETTINGS,
-        ...parsedSettings,
-        // Deep-merge meters so partial/older saved states keep sane defaults.
-        meters: {
-          ...DEFAULT_METER_SETTINGS,
-          ...savedMeters,
-          ledSize,
-          brightness,
-          colors: {
-            ...DEFAULT_METER_SETTINGS.colors,
-            ...(savedMeters.colors ?? {}),
-          },
-        },
-      },
-      pinned: Array.isArray(parsed.pinned) ? parsed.pinned : [],
-      renames: parsed.renames && typeof parsed.renames === "object" ? (parsed.renames as Record<string, string>) : {},
-    };
+    return sanitizeState(JSON.parse(raw));
   } catch {
     return structuredClone(DEFAULTS);
   }

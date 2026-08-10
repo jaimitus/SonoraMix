@@ -50,6 +50,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             info!("initializing SonoraMix v{}", app.package_info().version);
 
@@ -93,6 +94,8 @@ pub fn run() {
             commands::set_close_behavior,
             commands::toggle_global_mic_mute,
             commands::toggle_window_visibility,
+            commands::export_config,
+            commands::import_config,
         ])
         .run(tauri::generate_context!())
         .expect("fatal error while running SonoraMix runtime");

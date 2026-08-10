@@ -6,6 +6,7 @@
  * a live progress bar. Dismissible without losing the header update indicator.
  */
 import type { Update } from "@tauri-apps/plugin-updater";
+import { useT } from "../i18n";
 
 interface UpdateBannerProps {
   update: Update;
@@ -36,6 +37,7 @@ export default function UpdateBanner({
   onInstall,
   onDismiss,
 }: UpdateBannerProps) {
+  const t = useT();
   const pct = Math.round(Math.min(1, Math.max(0, progress)) * 100);
 
   return (
@@ -63,7 +65,7 @@ export default function UpdateBanner({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <p className="font-display text-[13px] font-bold tracking-tight text-ink-100">
-                SonoraMix <span className="text-signal">v{update.version}</span> available
+                {t("update.available", { version: update.version })}
               </p>
               <span className="led led-green led-pulse" aria-hidden="true" />
             </div>
@@ -71,7 +73,7 @@ export default function UpdateBanner({
               <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-ink-300">{update.body}</p>
             ) : (
               <p className="mt-1 text-[11px] leading-snug text-ink-300">
-                A new version of SonoraMix is ready to install.
+                {t("update.ready")}
               </p>
             )}
           </div>
@@ -86,7 +88,7 @@ export default function UpdateBanner({
               />
             </div>
             <div className="mt-1.5 flex items-center justify-between">
-              <span className="typo-monoline text-[10px]">Downloading update…</span>
+              <span className="typo-monoline text-[10px]">{t("update.downloading")}</span>
               <span className="typo-number text-[10px] text-ink-300">
                 {total > 0 ? `${formatBytes(downloaded)} / ${formatBytes(total)}` : pct > 0 ? `${pct}%` : "starting"}
               </span>
@@ -110,10 +112,10 @@ export default function UpdateBanner({
                 <path d="M8 2.5v7M5.4 7 8 9.6 10.6 7" strokeLinecap="round" strokeLinejoin="round" />
                 <path d="M3 11.5V13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1.5" strokeLinecap="round" />
               </svg>
-              Download &amp; Install
+              {t("update.install")}
             </button>
             <button type="button" onClick={onDismiss} className="btn btn-ghost">
-              Later
+              {t("update.later")}
             </button>
           </div>
         )}

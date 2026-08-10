@@ -3,16 +3,20 @@
  * Fixed 272px module width to guarantee 100% layout stability on window resize.
  *
  * Anatomy:
- *   - Top: App Icon + Name (double-click to rename) + Pin/Flow badges
+ *   - Top: App Icon + Name (double-click to rename) + Pin/Flow badges + drag grip
  *   - Device bar (render only): clickable "output → device" control that opens
  *     the in-app routing picker — the primary, always-visible routing surface
  *   - Center: Vertical Fader | dB Scale | Dual Stereo PPM Meter
- *   - Bottom: Mute Toggle + peak-hold + live dBFS readout
+ *   - Bottom: SOLO + Mute Toggle + peak-hold + live dBFS readout
+ *
+ * v1.2.0: SOLO bus logic, Ctrl+click multi-select, drag-to-reorder (grip),
+ * and full i18n (EN/ES).
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AudioDeviceInfo, AudioSessionInfo, LevelSource } from "../types";
 import { getDisplayName } from "../utils/names";
 import { volumeToDb } from "../utils/db";
+import { useT } from "../i18n";
 import Fader from "./Fader";
 import VumeterCanvas, { DbReadout, PeakHoldReadout } from "./VumeterCanvas";
 
@@ -39,6 +43,26 @@ interface SessionCardProps {
   routedDeviceId?: string;
   /** Reset this session back to the system default output device */
   onResetRoute?: () => void;
+
+  // ── v1.2.0: SOLO / multi-select / drag-to-reorder ──────────────
+  /** Whether this channel is in solo mode */
+  soloed?: boolean;
+  /** Whether any channel in the console is soloed (others get dimmed) */
+  soloActive?: boolean;
+  /** Toggle solo for this channel */
+  onToggleSolo?: () => void;
+  /** Whether this channel is part of a multi-selection */
+  selected?: boolean;
+  /** Ctrl+click toggles this channel in the multi-selection */
+  onSelect?: () => void;
+  /** True while this card is the source of a drag */
+  dragging?: boolean;
+  /** True while a drag is hovering over this card (drop target) */
+  dragOver?: boolean;
+  onDragStart?: (exe: string) => void;
+  onDragOver?: (exe: string) => void;
+  onDrop?: (exe: string) => void;
+  onDragEnd?: () => void;
 }
 
 const hueOf = (pid: number): number => (pid * 137 + 20) % 360;
@@ -58,7 +82,19 @@ export default function SessionCard({
   onRoute,
   routedDeviceId,
   onResetRoute,
+  soloed,
+  soloActive,
+  onToggleSolo,
+  selected,
+  onSelect,
+  dragging,
+  dragOver,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
 }: SessionCardProps) {
+  const t = useT();
   const mutedRef = useRef(session.muted);
   mutedRef.current = session.muted;
 
@@ -117,18 +153,48 @@ export default function SessionCard({
 
   const routedDeviceName = renderDevices?.find((d) => d.id === routedDeviceId)?.name;
 
+  // Solo-muted: another channel is soloed and this one is not.
+  const soloDimmed = !!soloActive && !soloed && !!onToggleSolo;
+
   return (
     <article
-      className={`group relative flex flex-col w-[272px] p-3.5 rounded-xl bg-panel-2/70 border border-rule hover:border-rule-strong transition-[border-color,box-shadow,opacity,filter] duration-200 ${
-        standby ? "channel-standby" : ""
-      }`}
+      className={`group relative flex flex-col w-[272px] p-3.5 rounded-xl bg-panel-2/70 border transition-[border-color,box-shadow,opacity,filter] duration-200 ${
+        dragOver
+          ? "border-route/70 shadow-[0_0_0_2px_rgba(51,209,184,0.25)]"
+          : selected
+            ? "border-route/70 shadow-[0_0_0_1px_rgba(51,209,184,0.4)]"
+            : "border-rule hover:border-rule-strong"
+      } ${standby ? "channel-standby" : ""} ${dragging ? "opacity-40" : ""}`}
       style={{
-        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.03), 0 8px 22px rgba(0,0,0,0.3)`,
+        boxShadow: selected
+          ? "inset 0 1px 0 rgba(255,255,255,0.03), 0 8px 22px rgba(0,0,0,0.3), 0 0 0 1px rgba(51,209,184,0.45), 0 0 18px rgba(51,209,184,0.12)"
+          : "inset 0 1px 0 rgba(255,255,255,0.03), 0 8px 22px rgba(0,0,0,0.3)",
         animationDelay: `${Math.min(index, 12) * 45}ms`,
       }}
       aria-label={`${displayName} channel strip, volume ${Math.round(session.volume * 100)}%, ${session.muted ? "muted" : "active"}`}
+      onClick={(e) => {
+        // Ctrl/Cmd+click toggles multi-selection — but only when the click
+        // landed on the card body, never on an interactive control (mute,
+        // solo, pin, routing bar, rename input, fader).
+        if (e.defaultPrevented) return;
+        if (!(e.ctrlKey || e.metaKey) || !onSelect) return;
+        const target = e.target as HTMLElement;
+        if (target.closest("button, input, select, a, [role='slider'], [role='menuitem']")) return;
+        e.preventDefault();
+        onSelect();
+      }}
+      onDragOver={(e) => {
+        // Allow dropping anywhere on the card (drag starts from the grip).
+        e.preventDefault();
+        onDragOver?.(session.exe);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        onDrop?.(session.exe);
+      }}
+      onDragEnd={onDragEnd}
     >
-      {/* Top Header: App icon + Display Name + Badges */}
+      {/* Top Header: App icon + Display Name + Badges + drag grip */}
       <div className="mb-2.5 flex items-center gap-2.5">
         <div
           className="flex h-9 w-9 flex-none items-center justify-center overflow-hidden rounded-lg border"
@@ -175,7 +241,7 @@ export default function SessionCard({
                 className={`truncate font-semibold text-[13px] tracking-tight ${
                   session.muted ? "text-ink-300" : "text-ink-100"
                 }`}
-                title={`${session.exe} — double-click to rename`}
+                title={t("channel.renameHint", { exe: session.exe })}
                 onDoubleClick={startEditing}
               >
                 {displayName}
@@ -186,7 +252,7 @@ export default function SessionCard({
                 type="button"
                 onClick={onTogglePin}
                 aria-pressed={!!pinned}
-                title={pinned ? `Unpin ${displayName}` : `Pin ${displayName} to the top`}
+                title={pinned ? t("channel.unpin", { name: displayName }) : t("channel.pin", { name: displayName })}
                 className={`flex h-4 w-4 flex-none items-center justify-center rounded transition-colors ${
                   pinned ? "text-signal" : "text-ink-500 opacity-0 group-hover:opacity-100 hover:text-ink-100"
                 }`}
@@ -213,22 +279,40 @@ export default function SessionCard({
             )}
             {session.flow === "capture" && (
               <span
-                title={
-                  session.state === "active"
-                    ? "Actively capturing audio"
-                    : "Held by the app but silent — start talking or recording to see it go LIVE"
-                }
+                title={session.state === "active" ? t("channel.activeCapture") : t("channel.heldCapture")}
                 className={`shrink-0 rounded px-1 py-px text-[8px] font-bold tracking-wider uppercase ${
                   session.state === "active"
                     ? "text-led-green bg-led-green/10 border border-led-green/30"
                     : "text-led-amber bg-led-amber/10 border border-led-amber/30"
                 }`}
               >
-                {session.state === "active" ? "LIVE" : "STANDBY"}
+                {session.state === "active" ? t("channel.live") : t("channel.standby")}
               </span>
             )}
           </div>
         </div>
+
+        {/* Drag-to-reorder grip (v1.2.0) */}
+        {onDragStart && (
+          <div
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = "move";
+              e.dataTransfer.setData("text/plain", session.exe);
+              onDragStart(session.exe);
+            }}
+            title={t("channel.drag")}
+            aria-label={t("channel.drag")}
+            className="flex h-6 w-4 flex-none cursor-grab items-center justify-center rounded text-ink-500 opacity-0 transition-all group-hover:opacity-100 hover:text-ink-100 active:cursor-grabbing"
+          >
+            <svg viewBox="0 0 8 16" className="h-4 w-2" fill="currentColor" aria-hidden="true">
+              <circle cx="2" cy="2" r="1" /><circle cx="6" cy="2" r="1" />
+              <circle cx="2" cy="6" r="1" /><circle cx="6" cy="6" r="1" />
+              <circle cx="2" cy="10" r="1" /><circle cx="6" cy="10" r="1" />
+              <circle cx="2" cy="14" r="1" /><circle cx="6" cy="14" r="1" />
+            </svg>
+          </div>
+        )}
       </div>
 
       {/* Device Routing Bar (render sessions only) — the primary, always-visible
@@ -251,8 +335,8 @@ export default function SessionCard({
               aria-haspopup="menu"
               title={
                 routedDeviceId
-                  ? `Output: ${routedDeviceName ?? "custom device"} — click to change`
-                  : `Output: system default — click to route ${displayName}`
+                  ? t("channel.routeTitle", { device: routedDeviceName ?? t("channel.customDevice") })
+                  : t("channel.routeDefaultTitle", { name: displayName })
               }
               className={`flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 text-left text-[10px] font-medium transition-colors ${
                 routedDeviceId
@@ -266,7 +350,7 @@ export default function SessionCard({
               <span className="min-w-0 flex-1 truncate">
                 {/* Routed to a device no longer in the list (unplugged) is NOT
                     "system default" — keep the old "Custom device" fallback. */}
-                {routedDeviceId ? (routedDeviceName ?? "Custom device") : "System default"}
+                {routedDeviceId ? (routedDeviceName ?? t("channel.customDevice")) : t("channel.systemDefault")}
               </span>
               <svg viewBox="0 0 16 16" className="h-3 w-3 shrink-0 text-ink-500" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
                 <path d="M4 6l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
@@ -276,8 +360,8 @@ export default function SessionCard({
               <button
                 type="button"
                 onClick={onResetRoute}
-                title={`Reset ${displayName} to the system default device`}
-                aria-label={`Reset ${displayName} output to default`}
+                title={t("channel.routeResetTitle", { name: displayName })}
+                aria-label={t("channel.routeResetTitle", { name: displayName })}
                 className="mr-1.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-ink-300 transition-colors hover:bg-ink-950/60 hover:text-led-red"
               >
                 <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
@@ -294,7 +378,7 @@ export default function SessionCard({
               style={{ animation: "fade-in 0.14s ease both" }}
             >
               <p className="px-2 pt-1 pb-1.5 text-[9px] font-bold uppercase tracking-widest text-ink-500">
-                Route {displayName} to…
+                {t("channel.route", { name: displayName })}
               </p>
               {onResetRoute && (
                 <>
@@ -310,7 +394,7 @@ export default function SessionCard({
                     <svg viewBox="0 0 16 16" className="h-3 w-3 text-led-amber" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
                       <path d="M13 8a5 5 0 1 1-1.5-3.5M13 1.5v3h-3" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
-                    Reset to system default
+                    {t("channel.routeReset")}
                   </button>
                   <div className="my-1 border-t border-rule/50" />
                 </>
@@ -329,7 +413,7 @@ export default function SessionCard({
                           setRouteOpen(false);
                           onRouteToDevice?.(dev.id);
                         }}
-                        title={dev.enabled ? dev.name : `${dev.name} (disabled — enable it first)`}
+                        title={dev.enabled ? dev.name : t("channel.routeDisabled", { name: dev.name })}
                         aria-current={isCurrent || undefined}
                         className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[11px] transition-colors ${
                           dev.enabled
@@ -348,7 +432,7 @@ export default function SessionCard({
                         <span className="min-w-0 flex-1 truncate">{dev.name}</span>
                         {isCurrent && (
                           <span className="shrink-0 rounded bg-signal/20 px-1 py-px text-[7px] font-bold uppercase tracking-wider text-signal">
-                            Now
+                            {t("channel.routeNow")}
                           </span>
                         )}
                         <span className="shrink-0 text-[8px] text-ink-500">{dev.formFactor}</span>
@@ -356,7 +440,7 @@ export default function SessionCard({
                     );
                   })
                 ) : (
-                  <p className="px-2 py-1.5 text-[10px] text-ink-500">No output devices found</p>
+                  <p className="px-2 py-1.5 text-[10px] text-ink-500">{t("channel.routeNoDevices")}</p>
                 )}
               </div>
               {onRoute && (
@@ -374,7 +458,7 @@ export default function SessionCard({
                     <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
                       <path d="M3.5 3.5h6a2 2 0 0 1 2 2v4M12.5 10.5 15 8l-2.5-2.5M3.5 12.5h6a2 2 0 0 0 2-2V2.5" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
-                    Open Windows per-app settings…
+                    {t("channel.openWindows")}
                   </button>
                 </>
               )}
@@ -384,7 +468,11 @@ export default function SessionCard({
       )}
 
       {/* Main Console Strip Module: Vertical Fader | dB Scale Divider | Dual Stereo PPM Meter */}
-      <div className="relative flex min-h-[165px] flex-1 items-stretch gap-2 px-0.5 py-1 bg-ink-950/60 rounded-lg border border-rule/40">
+      <div
+        className={`relative flex min-h-[165px] flex-1 items-stretch gap-2 px-0.5 py-1 bg-ink-950/60 rounded-lg border border-rule/40 transition-opacity ${
+          soloDimmed ? "opacity-50" : ""
+        }`}
+      >
         {/* Fader Column (Left) */}
         <div className="flex w-[76px] flex-none flex-col items-center justify-between py-1">
           <Fader value={session.volume} onChange={(v) => onVolume(session.id, v)} showValue={false} />
@@ -425,22 +513,42 @@ export default function SessionCard({
         </div>
       </div>
 
-      {/* Bottom Footer: Mute Toggle + Peak hold + live dBFS Readout */}
+      {/* Bottom Footer: SOLO + Mute Toggle + Peak hold + live dBFS Readout */}
       <div className="mt-2.5 flex items-center justify-between gap-2">
-        <button
-          type="button"
-          onClick={() => onMute(session.id, !session.muted)}
-          aria-pressed={session.muted}
-          title={session.muted ? `Unmute ${displayName}` : `Mute ${displayName}`}
-          className={`inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2.5 text-[10px] font-bold tracking-wider transition-all ${
-            session.muted
-              ? "btn-mute-active"
-              : "bg-ink-800/80 text-ink-300 border border-rule/50 hover:bg-led-red/15 hover:text-led-red hover:border-led-red/40"
-          }`}
-        >
-          <span className={`led ${session.muted ? "led-white" : "led-green"}`} style={{ width: "5px", height: "5px" }} />
-          {session.muted ? "MUTED" : "MUTE"}
-        </button>
+        <div className="flex items-center gap-1.5">
+          {onToggleSolo && (
+            <button
+              type="button"
+              onClick={onToggleSolo}
+              aria-pressed={!!soloed}
+              title={soloed ? t("channel.unsoloTitle") : t("channel.soloTitle", { name: displayName })}
+              className={`inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2.5 text-[10px] font-bold tracking-wider transition-all ${
+                soloed
+                  ? "bg-led-amber text-ink-950 border border-led-amber shadow-[0_0_10px_rgba(255,192,30,0.35)]"
+                  : soloActive
+                    ? "bg-ink-800/80 text-ink-500 border border-rule/50"
+                    : "bg-ink-800/80 text-ink-300 border border-rule/50 hover:bg-led-amber/15 hover:text-led-amber hover:border-led-amber/40"
+              }`}
+            >
+              <span className={`led ${soloed ? "led-amber" : "led-off"}`} style={{ width: "5px", height: "5px" }} />
+              {soloed ? t("channel.soloed") : t("channel.solo")}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => onMute(session.id, !session.muted)}
+            aria-pressed={session.muted}
+            title={session.muted ? t("channel.unmuteTitle", { name: displayName }) : t("channel.muteTitle", { name: displayName })}
+            className={`inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2.5 text-[10px] font-bold tracking-wider transition-all ${
+              session.muted
+                ? "btn-mute-active"
+                : "bg-ink-800/80 text-ink-300 border border-rule/50 hover:bg-led-red/15 hover:text-led-red hover:border-led-red/40"
+            }`}
+          >
+            <span className={`led ${session.muted ? "led-white" : "led-green"}`} style={{ width: "5px", height: "5px" }} />
+            {session.muted ? t("channel.muted") : t("channel.mute")}
+          </button>
+        </div>
 
         <div className="flex items-center gap-1.5">
           {session.flow === "render" && (
@@ -455,6 +563,15 @@ export default function SessionCard({
           </div>
         </div>
       </div>
+
+      {/* Selected / drag-over indicator bar */}
+      {(selected || dragOver) && (
+        <div
+          className="absolute inset-x-0 -bottom-px h-[3px] rounded-b-xl"
+          style={{ background: "linear-gradient(90deg, #33d1b8, #38bdf8)" }}
+          aria-hidden="true"
+        />
+      )}
     </article>
   );
 }

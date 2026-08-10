@@ -3,6 +3,7 @@
  * master RMS, uptime, and WASAPI MTA status.
  */
 import type { EngineMode } from "../types";
+import { useT } from "../i18n";
 
 interface StatusBarProps {
   mode: EngineMode;
@@ -30,6 +31,7 @@ export default function StatusBar({
   masterDb,
   startedAt,
 }: StatusBarProps) {
+  const t = useT();
   return (
     <footer
       className="sticky bottom-0 z-30 border-t border-rule"
@@ -42,31 +44,31 @@ export default function StatusBar({
           <div className="flex items-center gap-1.5">
             <span className={`led ${streaming ? "led-green" : "led-amber"}`} />
             <span className="typo-monoline text-[11px]">
-              Stream {hz.toFixed(1)} Hz
+              {t("status.stream", { hz: hz.toFixed(1) })}
             </span>
           </div>
 
           <div className="typo-monoline text-[11px] text-ink-300">
-            {sessions} active session{sessions !== 1 ? "s" : ""}
+            {t("status.sessions", { n: sessions, s: sessions !== 1 ? "s" : "" })}
           </div>
 
           <div className="hidden sm:flex typo-monoline text-[11px] text-ink-300">
-            {frames.toLocaleString("en-US")} frames
+            {t("status.frames", { n: frames.toLocaleString("en-US") })}
           </div>
 
           <div className="hidden md:flex items-center gap-1.5">
-            <span className="typo-monoline text-[11px] text-ink-500">Master</span>
+            <span className="typo-monoline text-[11px] text-ink-500">{t("status.master")}</span>
             <DbReadoutMaster value={masterDb} />
           </div>
 
           <div className="typo-monoline text-[11px] text-ink-300">
-            UP {formatUptime(startedAt)}
+            {t("status.uptime", { time: formatUptime(startedAt) })}
           </div>
 
           <div
             className="ml-auto rounded px-2 py-0.5 text-[9.5px] font-semibold tracking-wider uppercase text-led-green border border-led-green/25 bg-led-green/[0.04]"
           >
-            WASAPI · COM-MTA
+            {t("status.engine")}
           </div>
         </div>
       </div>

@@ -258,3 +258,17 @@ pub fn toggle_window_visibility(window: Window) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Writes the serialized configuration backup to a user-chosen file
+/// (path comes from the frontend save dialog).
+#[tauri::command]
+pub fn export_config(path: String, contents: String) -> Result<(), String> {
+    std::fs::write(&path, contents).map_err(|e| format!("Failed to write {}: {}", path, e))
+}
+
+/// Reads a configuration backup file selected by the user and returns its raw
+/// text so the frontend can sanitize + apply it.
+#[tauri::command]
+pub fn import_config(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("Failed to read {}: {}", path, e))
+}

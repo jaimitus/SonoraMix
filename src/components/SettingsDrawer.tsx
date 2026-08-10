@@ -3,6 +3,9 @@
  * Opened from the gear button in the header. Includes a shortcut recorder
  * that captures a key combination (with at least one modifier) to assign it
  * to an action.
+ *
+ * v1.2.0: language selector (EN/ES), auto-duck controls and config backup
+ * export/import.
  */
 import { useEffect, useState } from "react";
 import {
@@ -14,6 +17,7 @@ import {
   type MeterColors,
   type Shortcuts,
 } from "../settings";
+import { useT, type Lang } from "../i18n";
 
 interface SettingsDrawerProps {
   open: boolean;
@@ -23,6 +27,10 @@ interface SettingsDrawerProps {
   appVersion: string;
   /** Whether we're inside the Tauri webview (autostart etc. only apply there) */
   desktop: boolean;
+  /** Export the full configuration to a JSON backup file */
+  onExport: () => void;
+  /** Import a configuration backup file */
+  onImport: () => void;
 }
 
 type ShortcutAction = keyof Shortcuts;
@@ -109,7 +117,10 @@ export default function SettingsDrawer({
   onUpdate,
   appVersion,
   desktop,
+  onExport,
+  onImport,
 }: SettingsDrawerProps) {
+  const t = useT();
   const [recording, setRecording] = useState<ShortcutAction | null>(null);
 
   // Capture the key combination while recording (before other handlers).
@@ -137,13 +148,13 @@ export default function SettingsDrawer({
   const shortcutRows: { action: ShortcutAction; label: string; description: string }[] = [
     {
       action: "micMute",
-      label: "Toggle microphone mute",
-      description: "Mute/unmute the system mic from anywhere.",
+      label: t("settings.shortcutMic"),
+      description: t("settings.shortcutMicDesc"),
     },
     {
       action: "toggleWindow",
-      label: "Show / hide window",
-      description: "Summon or hide SonoraMix from anywhere.",
+      label: t("settings.shortcutWindow"),
+      description: t("settings.shortcutWindowDesc"),
     },
   ];
 
@@ -155,6 +166,11 @@ export default function SettingsDrawer({
 
   const setZoneColor = (zone: keyof MeterColors, value: string) =>
     onUpdate("meters", { ...settings.meters, colors: { ...settings.meters.colors, [zone]: value } });
+
+  const languages: { id: Lang; label: string }[] = [
+    { id: "en", label: "English" },
+    { id: "es", label: "Español" },
+  ];
 
   return (
     <>
@@ -169,8 +185,8 @@ export default function SettingsDrawer({
         {/* Drawer header */}
         <div className="flex items-center justify-between border-b border-rule px-5 py-4">
           <div>
-            <h2 className="font-display text-[14px] font-bold tracking-tight text-ink-100">SETTINGS</h2>
-            <p className="typo-caption mt-0.5 text-[9px]">SonoraMix preferences</p>
+            <h2 className="font-display text-[14px] font-bold tracking-tight text-ink-100">{t("settings.title")}</h2>
+            <p className="typo-caption mt-0.5 text-[9px]">{t("settings.subtitle")}</p>
           </div>
           <button
             type="button"
@@ -185,9 +201,31 @@ export default function SettingsDrawer({
         </div>
 
         <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
+          {/* Language */}
+          <section>
+            <h3 className="typo-caption mb-2.5 text-[10px] font-bold">{t("settings.language")}</h3>
+            <div className="flex items-center gap-1.5 rounded-lg border border-rule bg-ink-900/70 p-1">
+              {languages.map((l) => (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => onUpdate("language", l.id)}
+                  aria-pressed={settings.language === l.id}
+                  className={`flex-1 rounded-md px-2 py-1.5 text-[11px] font-bold tracking-wide transition-all ${
+                    settings.language === l.id
+                      ? "bg-route/20 text-route border border-route/40"
+                      : "text-ink-300 hover:text-ink-100"
+                  }`}
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
+          </section>
+
           {/* Appearance */}
           <section>
-            <h3 className="typo-caption mb-2.5 text-[10px] font-bold">Appearance</h3>
+            <h3 className="typo-caption mb-2.5 text-[10px] font-bold">{t("settings.appearance")}</h3>
             <div className="grid grid-cols-3 gap-2">
               {ACCENTS.map((a) => (
                 <button
@@ -207,17 +245,15 @@ export default function SettingsDrawer({
                 </button>
               ))}
             </div>
-            <p className="mt-2 text-[10px] leading-snug text-ink-500">
-              Accent color for the whole console (outputs, master, buttons).
-            </p>
+            <p className="mt-2 text-[10px] leading-snug text-ink-500">{t("settings.accentDesc")}</p>
           </section>
 
           {/* Meters */}
           <section>
-            <h3 className="typo-caption mb-2.5 text-[10px] font-bold">VU Meters</h3>
+            <h3 className="typo-caption mb-2.5 text-[10px] font-bold">{t("settings.meters")}</h3>
 
             {/* Color presets */}
-            <p className="mb-1.5 text-[10px] font-semibold text-ink-300">Color preset</p>
+            <p className="mb-1.5 text-[10px] font-semibold text-ink-300">{t("settings.metersPreset")}</p>
             <div className="grid grid-cols-5 gap-1.5">
               {METER_PRESETS.map((p) => {
                 const active =
@@ -252,13 +288,13 @@ export default function SettingsDrawer({
             </div>
 
             {/* Per-zone custom colors */}
-            <p className="mt-3 mb-1.5 text-[10px] font-semibold text-ink-300">Custom colors</p>
+            <p className="mt-3 mb-1.5 text-[10px] font-semibold text-ink-300">{t("settings.metersCustom")}</p>
             <div className="flex flex-col gap-1.5">
               {(
                 [
-                  { zone: "green", label: "Green zone", color: settings.meters.colors.green },
-                  { zone: "amber", label: "Amber zone", color: settings.meters.colors.amber },
-                  { zone: "red", label: "Red zone", color: settings.meters.colors.red },
+                  { zone: "green", label: t("settings.metersGreen"), color: settings.meters.colors.green },
+                  { zone: "amber", label: t("settings.metersAmber"), color: settings.meters.colors.amber },
+                  { zone: "red", label: t("settings.metersRed"), color: settings.meters.colors.red },
                 ] as { zone: keyof MeterColors; label: string; color: string }[]
               ).map(({ zone, label, color }) => (
                 <label
@@ -282,7 +318,7 @@ export default function SettingsDrawer({
 
             {/* Brightness slider */}
             <p className="mt-3 mb-1.5 flex items-center justify-between text-[10px] font-semibold text-ink-300">
-              <span>Brightness</span>
+              <span>{t("settings.metersBrightness")}</span>
               <span className="font-mono text-ink-100">{Math.round(settings.meters.brightness * 100)}%</span>
             </p>
             <input
@@ -296,13 +332,13 @@ export default function SettingsDrawer({
               className="meter-range w-full"
             />
             <div className="mt-0.5 flex justify-between text-[8px] text-ink-500">
-              <span>50% · subtle</span>
+              <span>50%</span>
               <span>100%</span>
-              <span>150% · hot</span>
+              <span>150%</span>
             </div>
 
             {/* LED size */}
-            <p className="mt-3 mb-1.5 text-[10px] font-semibold text-ink-300">LED segment size</p>
+            <p className="mt-3 mb-1.5 text-[10px] font-semibold text-ink-300">{t("settings.metersLedSize")}</p>
             <div className="flex items-center gap-1.5 rounded-lg border border-rule bg-ink-900/70 p-1">
               {ledSizes.map((s) => (
                 <button
@@ -326,45 +362,88 @@ export default function SettingsDrawer({
               <Toggle
                 checked={settings.meters.showPeakHold}
                 onChange={(v) => onUpdate("meters", { ...settings.meters, showPeakHold: v })}
-                label="Show peak-hold line"
-                description="Keep a bright line at the loudest level reached."
+                label={t("settings.metersPeakHold")}
+                description={t("settings.metersPeakHoldDesc")}
               />
             </div>
           </section>
 
           {/* Behavior */}
           <section>
-            <h3 className="typo-caption mb-2.5 text-[10px] font-bold">Behavior</h3>
+            <h3 className="typo-caption mb-2.5 text-[10px] font-bold">{t("settings.behavior")}</h3>
             <div className="space-y-2">
               <Toggle
                 checked={settings.closeToTray}
                 onChange={(v) => onUpdate("closeToTray", v)}
-                label="Minimize to tray on close"
-                description="Keep running in the background when you close the window."
+                label={t("settings.closeToTray")}
+                description={t("settings.closeToTrayDesc")}
               />
               <Toggle
                 checked={settings.launchMinimized}
                 onChange={(v) => onUpdate("launchMinimized", v)}
-                label="Start minimized to tray"
-                description="Launch SonoraMix quietly in the background."
+                label={t("settings.launchMinimized")}
+                description={t("settings.launchMinimizedDesc")}
               />
               <Toggle
                 checked={settings.autostart}
                 onChange={(v) => onUpdate("autostart", v)}
                 disabled={!desktop}
-                label="Launch at Windows startup"
-                description={
-                  desktop
-                    ? "Start SonoraMix automatically when you log in."
-                    : "Only available in the desktop app."
-                }
+                label={t("settings.autostart")}
+                description={desktop ? t("settings.autostartDesc") : t("settings.autostartDesktop")}
               />
+            </div>
+          </section>
+
+          {/* Auto-Duck (v1.2.0) */}
+          <section>
+            <h3 className="typo-caption mb-2.5 text-[10px] font-bold">{t("ducking.section")}</h3>
+            <div className="space-y-2.5 rounded-lg border border-rule bg-ink-900/50 px-3 py-3">
+              <Toggle
+                checked={settings.ducking.enabled}
+                onChange={(v) => onUpdate("ducking", { ...settings.ducking, enabled: v })}
+                label={t("ducking.title")}
+                description={t("ducking.desc")}
+              />
+              {settings.ducking.enabled && (
+                <>
+                  {/* Mic threshold */}
+                  <p className="mb-1 mt-2 flex items-center justify-between text-[10px] font-semibold text-ink-300">
+                    <span>{t("ducking.threshold")}</span>
+                    <span className="font-mono text-ink-100">{Math.round(settings.ducking.threshold * 100)}%</span>
+                  </p>
+                  <input
+                    type="range"
+                    min={0.02}
+                    max={0.5}
+                    step={0.01}
+                    value={settings.ducking.threshold}
+                    onChange={(e) => onUpdate("ducking", { ...settings.ducking, threshold: Number(e.target.value) })}
+                    aria-label={t("ducking.threshold")}
+                    className="meter-range w-full"
+                  />
+                  {/* Duck amount */}
+                  <p className="mb-1 mt-2 flex items-center justify-between text-[10px] font-semibold text-ink-300">
+                    <span>{t("ducking.amount")}</span>
+                    <span className="font-mono text-ink-100">{t("ducking.amountDb", { db: `-${settings.ducking.amountDb}` })}</span>
+                  </p>
+                  <input
+                    type="range"
+                    min={3}
+                    max={30}
+                    step={1}
+                    value={settings.ducking.amountDb}
+                    onChange={(e) => onUpdate("ducking", { ...settings.ducking, amountDb: Number(e.target.value) })}
+                    aria-label={t("ducking.amount")}
+                    className="meter-range w-full"
+                  />
+                </>
+              )}
             </div>
           </section>
 
           {/* Global Shortcuts */}
           <section>
-            <h3 className="typo-caption mb-2.5 text-[10px] font-bold">Global Shortcuts</h3>
+            <h3 className="typo-caption mb-2.5 text-[10px] font-bold">{t("settings.shortcuts")}</h3>
             <div className="space-y-2">
               {shortcutRows.map(({ action, label, description }) => {
                 const isRecording = recording === action;
@@ -373,7 +452,7 @@ export default function SettingsDrawer({
                     <div className="min-w-0">
                       <p className="text-[12px] font-semibold tracking-tight text-ink-100">{label}</p>
                       <p className="mt-0.5 text-[10px] leading-snug text-ink-500">
-                        {isRecording ? "Press your combination… (Esc to cancel)" : description}
+                        {isRecording ? t("settings.shortcutRecording") : description}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
@@ -414,24 +493,56 @@ export default function SettingsDrawer({
                 );
               })}
             </div>
-            <p className="mt-2 text-[10px] leading-snug text-ink-500">
-              Click a shortcut to record a new combination (needs a modifier key). If it's already
-              used by another app, it won't be assigned.
-            </p>
+            <p className="mt-2 text-[10px] leading-snug text-ink-500">{t("settings.shortcutHint")}</p>
+          </section>
+
+          {/* Backup (v1.2.0) */}
+          <section>
+            <h3 className="typo-caption mb-2.5 text-[10px] font-bold">{t("settings.data")}</h3>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={onExport}
+                className="flex w-full items-center gap-2.5 rounded-lg border border-rule bg-ink-900/70 px-3 py-2.5 text-left transition-colors hover:border-route/40 hover:bg-ink-900"
+              >
+                <span className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-route/15 text-route">
+                  <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                    <path d="M8 2.5v7M5.4 7 8 9.6 10.6 7" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M3 11.5V13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1.5" strokeLinecap="round" />
+                  </svg>
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[12px] font-semibold text-ink-100">{t("settings.export")}</span>
+                  <span className="block text-[10px] leading-snug text-ink-500">{t("settings.exportDesc")}</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={onImport}
+                className="flex w-full items-center gap-2.5 rounded-lg border border-rule bg-ink-900/70 px-3 py-2.5 text-left transition-colors hover:border-route/40 hover:bg-ink-900"
+              >
+                <span className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-signal/15 text-signal">
+                  <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                    <path d="M8 10.5v-7M5.4 6 8 3.4 10.6 6" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M3 11.5V13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1.5" strokeLinecap="round" />
+                  </svg>
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[12px] font-semibold text-ink-100">{t("settings.import")}</span>
+                  <span className="block text-[10px] leading-snug text-ink-500">{t("settings.importDesc")}</span>
+                </span>
+              </button>
+            </div>
           </section>
 
           {/* About */}
           <section>
-            <h3 className="typo-caption mb-2.5 text-[10px] font-bold">About</h3>
+            <h3 className="typo-caption mb-2.5 text-[10px] font-bold">{t("settings.about")}</h3>
             <div className="rounded-lg bg-ink-950/70 border border-rule px-3 py-2.5">
               <p className="text-[12px] font-semibold text-ink-100">
                 Sonora<span className="text-signal">Mix</span> v{appVersion}
               </p>
-              <p className="mt-1 text-[10px] leading-snug text-ink-500">
-                Native WASAPI audio session console · Rust + React (Tauri 2).
-                <br />
-                Per-app volume, mute, 60 Hz metering & endpoint routing.
-              </p>
+              <p className="mt-1 text-[10px] leading-snug text-ink-500">{t("settings.aboutDesc")}</p>
             </div>
           </section>
         </div>

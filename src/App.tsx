@@ -4,6 +4,10 @@
  * Real WASAPI session management, post-fader metering, and output endpoint routing.
  * Meter data flows through a mutable Map and is polled by canvas at 60 Hz.
  * React only re-renders on session/device changes and a 2 Hz stats tick.
+ *
+ * v1.2.0: Scenes (mixer snapshots), Auto-Duck (mic-gated playback attenuation),
+ * Ctrl+click multi-select faders, drag-to-reorder channels, config export/import,
+ * and full EN/ES i18n.
  */
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -33,12 +37,16 @@ import SettingsDrawer from "./components/SettingsDrawer";
 import StatusBar from "./components/StatusBar";
 import UpdateBanner from "./components/UpdateBanner";
 import VumeterCanvas, { DbReadout } from "./components/VumeterCanvas";
-import { loadState, saveState, type AppSettings, type PersistedState } from "./settings";
+import { loadState, saveState, type AppSettings, type PersistedState, type SceneSnapshot } from "./settings";
 import { MeterSettingsContext } from "./meterContext";
 import { getDisplayName } from "./utils/names";
 import { volumeToDb } from "./utils/db";
+import { setLang, useT } from "./i18n";
+import { exportConfig, importConfig } from "./io";
 
 const ZERO_LEVEL: LevelSample = { peak: 0, left: 0, right: 0, ts: 0 };
+
+const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 
 interface EBState { hasError: boolean; message: string }
 
@@ -82,6 +90,7 @@ export default function App() {
 }
 
 function Dashboard() {
+  const t = useT();
   const bridgeRef = useRef<AudioBridge | null>(null);
   const levelsRef = useRef(new Map<string, LevelSample>());
   const masterRef = useRef<LevelSample>({ ...ZERO_LEVEL });
@@ -127,11 +136,37 @@ function Dashboard() {
   // Last set of shortcuts known to be registered (used to revert a failed change).
   const lastActiveShortcutsRef = useRef(persisted.settings.shortcuts);
 
+  // ── v1.2.0 state ────────────────────────────────────────────────
+  // Solo: session id -> soloed. Soloed channels play; everything else soft-mutes.
+  const [solo, setSolo] = useState<Record<string, boolean>>({});
+  const engineMuteRef = useRef<Record<string, boolean>>({});
+  // Multi-select: set of session ids (Ctrl+click). Volumes/mutes apply to all.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Drag-to-reorder.
+  const [dragSource, setDragSource] = useState<string | null>(null);
+  const [dragOverExe, setDragOverExe] = useState<string | null>(null);
+  // Scenes panel.
+  const [scenesOpen, setScenesOpen] = useState(false);
+  const [sceneName, setSceneName] = useState("");
+  // Auto-duck live state (UI indicator).
+  const [duckingNow, setDuckingNow] = useState(false);
+  const duckingRef = useRef(false);
+  const duckBaseRef = useRef<Record<string, number>>({});
+  const sessionsRef = useRef<AudioSessionInfo[]>([]);
+  sessionsRef.current = sessions;
+  const routedRef = useRef(routedDevices);
+  routedRef.current = routedDevices;
+
   const showToast = useCallback((kind: ToastItem["kind"], title: string, body?: string) => {
     const id = ++toastIdRef.current;
     setToasts((prev) => [...prev.slice(-3), { id, kind, title, body }]);
-    window.setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4500);
+    window.setTimeout(() => setToasts((prev) => prev.filter((tt) => tt.id !== id)), 4500);
   }, []);
+
+  // Apply the UI language to the i18n store whenever it changes.
+  useEffect(() => {
+    setLang(persisted.settings.language);
+  }, [persisted.settings.language]);
 
   // Refresh the persisted route of every render session (in-app per-app routing).
   // Debounced + only when the set of session ids actually changed, so event
@@ -162,12 +197,6 @@ function Dashboard() {
       // clobber the freshly-routed value applied by handleRouteSession.
       if (fetchId !== routedFetchIdRef.current) return;
       setRoutedDevices((prev) => {
-        // Only ADD/UPDATE with confirmed non-empty values — a transient read
-        // failure (or an empty result while Windows is still applying a route)
-        // must NOT delete a device the user just routed; that made the bar
-        // silently revert to "System default" right after routing. Clearing
-        // happens via the explicit reset action, and entries for sessions that
-        // no longer exist (app closed) are pruned here.
         const next = { ...prev };
         const liveIds = new Set(render.map((s) => s.id));
         for (const id of Object.keys(next)) {
@@ -192,21 +221,21 @@ function Dashboard() {
         setUpdateDismissed(false);
         setUpdateUi({ kind: "available", update: result.update });
         if (!opts?.auto) {
-          showToast("info", "Update Available", `SonoraMix ${result.version} is ready to download.`);
+          showToast("info", t("toast.updateAvailable"), t("toast.updateAvailableBody", { version: result.version }));
         }
       } else if (result.status === "up-to-date") {
         setUpdateUi({ kind: "idle" });
         if (!opts?.auto) {
-          showToast("ok", "Up to Date", `You are running the latest version (${result.current}).`);
+          showToast("ok", t("toast.upToDate"), t("toast.upToDateBody", { version: result.current }));
         }
       } else if (result.status === "error") {
         setUpdateUi({ kind: "idle" });
-        if (!opts?.auto) showToast("error", "Update Check Failed", result.message);
+        if (!opts?.auto) showToast("error", t("toast.updateCheckFailed"), result.message);
       } else {
         setUpdateUi({ kind: "idle" });
       }
     },
-    [showToast],
+    [showToast, t],
   );
 
   const handleInstallUpdate = useCallback(async () => {
@@ -223,9 +252,9 @@ function Dashboard() {
     } catch (e) {
       updateBusyRef.current = false;
       setUpdateUi({ kind: "available", update });
-      showToast("error", "Update Failed", String(e));
+      showToast("error", t("toast.updateFailed"), String(e));
     }
-  }, [updateUi, showToast]);
+  }, [updateUi, showToast, t]);
 
   // Resolve the real runtime version for the footer / boot overlay.
   useEffect(() => {
@@ -235,8 +264,8 @@ function Dashboard() {
   // Auto-check for updates shortly after startup (desktop only).
   useEffect(() => {
     if (!isTauri()) return;
-    const t = window.setTimeout(() => handleCheckUpdates({ auto: true }), 4000);
-    return () => window.clearTimeout(t);
+    const tm = window.setTimeout(() => handleCheckUpdates({ auto: true }), 4000);
+    return () => window.clearTimeout(tm);
   }, [handleCheckUpdates]);
 
   const sessionSource = useCallback((id: string): LevelSource => () => levelsRef.current.get(id) ?? ZERO_LEVEL, []);
@@ -296,9 +325,9 @@ function Dashboard() {
         bridgeRef.current
           ?.toggleGlobalMicMute()
           .then((muted) =>
-            showToast("ok", "Global Mic Mute", muted ? "Microphone muted 🔇" : "Microphone unmuted 🎙️")
+            showToast("ok", t("toast.micMute"), muted ? t("toast.micMuted") : t("toast.micUnmuted"))
           )
-          .catch((e) => showToast("error", "Mic Mute Failed", String(e)));
+          .catch((e) => showToast("error", t("toast.micMuteFailed"), String(e)));
       });
       const okWindow = await registerOne(shortcuts.toggleWindow, (event) => {
         if (disposed || event.state !== "Pressed") return;
@@ -308,7 +337,7 @@ function Dashboard() {
       if (disposed) return;
 
       if (!okMute) {
-        showToast("error", "Shortcut Unavailable", `${shortcuts.micMute} is already in use or invalid.`);
+        showToast("error", t("toast.shortcutUnavailable"), t("toast.shortcutInUse", { combo: shortcuts.micMute }));
         if (shortcuts.micMute !== prev.micMute) {
           setPersisted((p) => ({
             ...p,
@@ -317,7 +346,7 @@ function Dashboard() {
         }
       }
       if (!okWindow) {
-        showToast("error", "Shortcut Unavailable", `${shortcuts.toggleWindow} is already in use or invalid.`);
+        showToast("error", t("toast.shortcutUnavailable"), t("toast.shortcutInUse", { combo: shortcuts.toggleWindow }));
         if (shortcuts.toggleWindow !== prev.toggleWindow) {
           setPersisted((p) => ({
             ...p,
@@ -337,15 +366,15 @@ function Dashboard() {
       disposed = true;
       unregisters.forEach((un) => un().catch(() => {}));
     };
-  }, [persisted.settings.shortcuts, showToast]);
+  }, [persisted.settings.shortcuts, showToast, t]);
 
   // ── Launch minimized to tray ────────────────────────────────────
   useEffect(() => {
     if (!isTauri() || !persisted.settings.launchMinimized) return;
-    const t = window.setTimeout(() => {
+    const tm = window.setTimeout(() => {
       getCurrentWindow().minimize().catch(() => {});
     }, 1600);
-    return () => window.clearTimeout(t);
+    return () => window.clearTimeout(tm);
   }, [persisted.settings.launchMinimized]);
 
   // ── Window bounds persistence (restore on launch, save on move/resize) ──
@@ -411,6 +440,156 @@ function Dashboard() {
     });
   }, []);
 
+  // ── Config export / import (v1.2.0) ─────────────────────────────
+  const handleExport = useCallback(async () => {
+    const ok = await exportConfig(persisted);
+    if (ok) showToast("ok", t("toast.exported"));
+    else showToast("error", t("toast.exportFailed"));
+  }, [persisted, showToast, t]);
+
+  const handleImport = useCallback(async () => {
+    const imported = await importConfig();
+    if (!imported) return; // cancelled or invalid
+    setPersisted(imported);
+    showToast("ok", t("toast.imported"));
+  }, [showToast, t]);
+
+  // ── Scenes (v1.2.0) ─────────────────────────────────────────────
+  const saveScene = useCallback(
+    (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      const apps: SceneSnapshot["apps"] = {};
+      for (const s of sessionsRef.current) {
+        const exe = s.exe.toLowerCase();
+        const route = routedRef.current[s.id];
+        apps[exe] = { volume: s.volume, muted: s.muted, ...(route ? { route } : {}) };
+      }
+      const scene: SceneSnapshot = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: trimmed,
+        createdAt: Date.now(),
+        apps,
+        master: { volume: master.volume, muted: master.muted },
+      };
+      setPersisted((prev) => ({ ...prev, scenes: [...prev.scenes, scene] }));
+      setSceneName("");
+      showToast("ok", t("scenes.saved"), trimmed);
+    },
+    [master, showToast, t],
+  );
+
+  const applyScene = useCallback(
+    (scene: SceneSnapshot) => {
+      const b = bridgeRef.current;
+      if (!b) return;
+      const apps = scene.apps;
+      // Apply master first.
+      if (scene.master) {
+        setMaster(scene.master);
+        b.setMasterVolume(scene.master.volume).catch(() => {});
+        b.setMasterMute(scene.master.muted).catch(() => {});
+      }
+      setSessions((prev) =>
+        prev.map((s) => {
+          const app = apps[s.exe.toLowerCase()];
+          if (!app) return s;
+          // Volume/mute.
+          b.setVolume(s.id, app.volume).catch(() => {});
+          b.setMute(s.id, app.muted).catch(() => {});
+          engineMuteRef.current[s.id] = app.muted;
+          // Route.
+          if (app.route) {
+            b.routeSessionDevice(s.pid, s.exe, app.route)
+              .then(() => {
+                setRoutedDevices((r) => ({ ...r, [s.id]: app.route! }));
+              })
+              .catch(() => {});
+          }
+          return { ...s, volume: app.volume, muted: app.muted };
+        }),
+      );
+      showToast("ok", t("scenes.applied"), scene.name);
+    },
+    [showToast, t],
+  );
+
+  const deleteScene = useCallback(
+    (id: string) => {
+      setPersisted((prev) => ({ ...prev, scenes: prev.scenes.filter((sc) => sc.id !== id) }));
+      showToast("info", t("scenes.deleted"));
+    },
+    [showToast, t],
+  );
+
+  // ── Auto-duck (v1.2.0) ──────────────────────────────────────────
+  // Sample the input device level ~6x/s; while above threshold, duck every
+  // render session by `amountDb`; release (with hysteresis) when it drops.
+  useEffect(() => {
+    const d = persisted.settings.ducking;
+    if (!d.enabled) {
+      if (duckingRef.current) {
+        duckingRef.current = false;
+        setDuckingNow(false);
+        const base = duckBaseRef.current;
+        duckBaseRef.current = {};
+        for (const [id, vol] of Object.entries(base)) {
+          setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, volume: vol } : s)));
+          pendingVolumesRef.current.set(id, vol);
+        }
+        if (flushTimerRef.current === null) {
+          flushTimerRef.current = window.setTimeout(() => {
+            flushTimerRef.current = null;
+            flushVolumes();
+          }, 45);
+        }
+      }
+      return;
+    }
+    const iv = window.setInterval(() => {
+      const peak = deviceInSource().peak;
+      if (!duckingRef.current && peak >= d.threshold) {
+        // Engage: snapshot current render volumes, then attenuate.
+        duckingRef.current = true;
+        setDuckingNow(true);
+        const gain = Math.pow(10, -d.amountDb / 20);
+        const base: Record<string, number> = {};
+        for (const s of sessionsRef.current) {
+          if (s.flow !== "render") continue;
+          base[s.id] = s.volume;
+          const target = clamp01(s.volume * gain);
+          setSessions((prev) => prev.map((x) => (x.id === s.id ? { ...x, volume: target } : x)));
+          pendingVolumesRef.current.set(s.id, target);
+        }
+        duckBaseRef.current = base;
+        if (flushTimerRef.current === null) {
+          flushTimerRef.current = window.setTimeout(() => {
+            flushTimerRef.current = null;
+            flushVolumes();
+          }, 45);
+        }
+      } else if (duckingRef.current && peak < d.threshold * 0.5) {
+        // Release: restore snapshot volumes.
+        duckingRef.current = false;
+        setDuckingNow(false);
+        const base = duckBaseRef.current;
+        duckBaseRef.current = {};
+        for (const [id, vol] of Object.entries(base)) {
+          setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, volume: vol } : s)));
+          pendingVolumesRef.current.set(id, vol);
+        }
+        if (flushTimerRef.current === null) {
+          flushTimerRef.current = window.setTimeout(() => {
+            flushTimerRef.current = null;
+            flushVolumes();
+          }, 45);
+        }
+      }
+    }, 150);
+    return () => window.clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persisted.settings.ducking.enabled, persisted.settings.ducking.threshold, persisted.settings.ducking.amountDb]);
+
   // ── Search + pin-aware session lists ────────────────────────────
   const displayNameFor = useCallback(
     (s: AudioSessionInfo) => persisted.renames[s.exe.toLowerCase()] ?? getDisplayName(s.exe),
@@ -426,28 +605,49 @@ function Dashboard() {
     [searchQuery, displayNameFor],
   );
 
-  const sortPinned = useCallback(
+  // Pinned first, then saved drag-order, then alphabetical.
+  const sortChannels = useCallback(
     (list: AudioSessionInfo[]) => {
       const pinnedSet = new Set(persisted.pinned);
+      const orderIdx = new Map(persisted.channelOrder.map((exe, i) => [exe, i]));
       return [...list].sort((a, b) => {
         const pa = pinnedSet.has(a.id) ? 0 : 1;
         const pb = pinnedSet.has(b.id) ? 0 : 1;
         if (pa !== pb) return pa - pb;
+        const ia = orderIdx.get(a.exe.toLowerCase()) ?? Infinity;
+        const ib = orderIdx.get(b.exe.toLowerCase()) ?? Infinity;
+        if (ia !== ib) return ia - ib;
         return a.exe.toLowerCase().localeCompare(b.exe.toLowerCase());
       });
     },
-    [persisted.pinned],
+    [persisted.pinned, persisted.channelOrder],
   );
 
   const allFiltered = useMemo(() => sessions.filter(matchesQuery), [sessions, matchesQuery]);
   const inputSessions = useMemo(
-    () => sortPinned(allFiltered.filter((s) => s.flow === "capture")),
-    [allFiltered, sortPinned],
+    () => sortChannels(allFiltered.filter((s) => s.flow === "capture")),
+    [allFiltered, sortChannels],
   );
   const outputSessions = useMemo(
-    () => sortPinned(allFiltered.filter((s) => s.flow !== "capture")),
-    [allFiltered, sortPinned],
+    () => sortChannels(allFiltered.filter((s) => s.flow !== "capture")),
+    [allFiltered, sortChannels],
   );
+
+  // ── Solo engine-sync (v1.2.0) ───────────────────────────────────
+  // The effective engine mute = user mute OR (solo engaged AND channel not soloed).
+  // We only push to the engine when the effective value actually changes.
+  useEffect(() => {
+    const b = bridgeRef.current;
+    if (!b) return;
+    const soloActive = Object.values(solo).some(Boolean);
+    for (const s of sessionsRef.current) {
+      const eff = s.muted || (soloActive && !solo[s.id]);
+      if (engineMuteRef.current[s.id] !== eff) {
+        engineMuteRef.current[s.id] = eff;
+        b.setMute(s.id, eff).catch(() => {});
+      }
+    }
+  }, [solo, sessions]);
 
   useEffect(() => {
     let disposed = false;
@@ -466,8 +666,12 @@ function Dashboard() {
 
       showToast(
         "ok",
-        "WASAPI Engine Online",
-        `${data.sessions.length} active audio session${data.sessions.length === 1 ? "" : "s"} detected.`
+        t("toast.wasapiOnline"),
+        t("toast.wasapiOnlineBody", {
+          n: data.sessions.length,
+          s: data.sessions.length === 1 ? "" : "s",
+          s2: data.sessions.length === 1 ? "" : "s",
+        }),
       );
 
       cleanupFns.push(
@@ -538,7 +742,7 @@ function Dashboard() {
           refreshRoutedDevices(data.sessions);
         }
       } catch (e) {
-        showToast("error", "Initialization Error", String(e));
+        showToast("error", t("toast.initError"), String(e));
       }
     })();
 
@@ -589,21 +793,37 @@ function Dashboard() {
       bridgeRef.current?.dispose();
       bridgeRef.current = null;
     };
-  }, [showToast]);
+  }, [showToast, t]);
 
   const flushVolumes = useCallback(() => {
     const b = bridgeRef.current;
     if (!b) return;
     pendingVolumesRef.current.forEach((volume, id) => {
-      b.setVolume(id, volume).catch((e) => showToast("error", "Volume Error", String(e)));
+      b.setVolume(id, volume).catch((e) => showToast("error", t("toast.volumeError"), String(e)));
     });
     pendingVolumesRef.current.clear();
-  }, [showToast]);
+  }, [showToast, t]);
 
   const handleVolume = useCallback(
     (id: string, volume: number) => {
-      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, volume } : s)));
-      pendingVolumesRef.current.set(id, volume);
+      if (selectedIds.has(id) && selectedIds.size > 1) {
+        // Multi-select: apply the same relative delta to every selected channel.
+        setSessions((prev) => {
+          const target = prev.find((s) => s.id === id);
+          if (!target) return prev;
+          const delta = volume - target.volume;
+          const next = prev.map((s) =>
+            selectedIds.has(s.id) ? { ...s, volume: clamp01(s.volume + delta) } : s,
+          );
+          for (const s of next) {
+            if (selectedIds.has(s.id)) pendingVolumesRef.current.set(s.id, s.volume);
+          }
+          return next;
+        });
+      } else {
+        setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, volume } : s)));
+        pendingVolumesRef.current.set(id, volume);
+      }
       if (flushTimerRef.current === null) {
         flushTimerRef.current = window.setTimeout(() => {
           flushTimerRef.current = null;
@@ -611,25 +831,82 @@ function Dashboard() {
         }, 45);
       }
     },
-    [flushVolumes],
+    [selectedIds, flushVolumes],
   );
 
   const handleMute = useCallback(
     (id: string, muted: boolean) => {
-      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, muted } : s)));
-      bridgeRef.current?.setMute(id, muted).catch((e) => showToast("error", "Mute Error", String(e)));
+      if (selectedIds.has(id) && selectedIds.size > 1) {
+        const ids = new Set(selectedIds);
+        setSessions((prev) => prev.map((s) => (ids.has(s.id) ? { ...s, muted } : s)));
+        const b = bridgeRef.current;
+        ids.forEach((sid) => {
+          engineMuteRef.current[sid] = muted;
+          b?.setMute(sid, muted).catch((e) => showToast("error", t("toast.muteError"), String(e)));
+        });
+      } else {
+        setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, muted } : s)));
+        engineMuteRef.current[id] = muted;
+        bridgeRef.current?.setMute(id, muted).catch((e) => showToast("error", t("toast.muteError"), String(e)));
+      }
     },
-    [showToast],
+    [selectedIds, showToast, t],
   );
+
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  // Drag-to-reorder (v1.2.0).
+  const moveChannel = useCallback((fromExe: string, toExe: string) => {
+    if (fromExe === toExe) return;
+    setPersisted((prev) => {
+      const order = prev.channelOrder.filter((x) => x !== fromExe);
+      const idx = order.indexOf(toExe);
+      if (idx === -1) order.push(fromExe);
+      else order.splice(idx, 0, fromExe);
+      return { ...prev, channelOrder: order };
+    });
+  }, []);
+
+  const handleDragStart = useCallback((exe: string) => {
+    setDragSource(exe);
+    setDragOverExe(null);
+  }, []);
+
+  const handleDragOver = useCallback((exe: string) => {
+    setDragOverExe((prev) => (prev === exe ? prev : exe));
+  }, []);
+
+  const handleDrop = useCallback(
+    (exe: string) => {
+      if (dragSource) moveChannel(dragSource, exe);
+      setDragSource(null);
+      setDragOverExe(null);
+    },
+    [dragSource, moveChannel],
+  );
+
+  const handleDragEnd = useCallback(() => {
+    setDragSource(null);
+    setDragOverExe(null);
+  }, []);
 
   const handleOutputDevice = useCallback(
     (id: string) => {
       setOutputDeviceId(id);
       setDevices((prev) => prev.map((d) => (d.flow !== "capture" ? { ...d, isDefault: d.id === id } : d)));
       const name = devices.find((d) => d.id === id)?.name ?? id;
-      bridgeRef.current?.setDevice(0, id).then(() => showToast("ok", "Default Output Set", name)).catch((e) => showToast("error", "Routing Error", String(e)));
+      bridgeRef.current?.setDevice(0, id).then(() => showToast("ok", t("toast.defaultOutput"), name)).catch((e) => showToast("error", t("toast.routingError"), String(e)));
     },
-    [devices, showToast],
+    [devices, showToast, t],
   );
 
   const handleInputDevice = useCallback(
@@ -637,9 +914,9 @@ function Dashboard() {
       setInputDeviceId(id);
       setDevices((prev) => prev.map((d) => (d.flow === "capture" ? { ...d, isDefault: d.id === id } : d)));
       const name = devices.find((d) => d.id === id)?.name ?? id;
-      bridgeRef.current?.setDevice(0, id).then(() => showToast("ok", "Default Mic Input Set", name)).catch((e) => showToast("error", "Routing Error", String(e)));
+      bridgeRef.current?.setDevice(0, id).then(() => showToast("ok", t("toast.defaultInput"), name)).catch((e) => showToast("error", t("toast.routingError"), String(e)));
     },
-    [devices, showToast],
+    [devices, showToast, t],
   );
 
   const handleTray = useCallback(() => {
@@ -655,10 +932,15 @@ function Dashboard() {
         setDevices(d);
         // Restart meter stream so it picks up new/changed sessions (especially capture)
         b.startStream().catch(() => {});
-        showToast("ok", "Rescan Complete", `${s.length} active session${s.length === 1 ? "" : "s"}, ${d.length} audio endpoint${d.length === 1 ? "" : "s"}.`);
+        showToast("ok", t("toast.rescanComplete"), t("toast.rescanCompleteBody", {
+          sessions: s.length,
+          s: s.length === 1 ? "" : "s",
+          devices: d.length,
+          s2: d.length === 1 ? "" : "s",
+        }));
       })
-      .catch((e) => showToast("error", "Rescan Failed", String(e)));
-  }, [showToast]);
+      .catch((e) => showToast("error", t("toast.rescanFailed"), String(e)));
+  }, [showToast, t]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -670,6 +952,11 @@ function Dashboard() {
       }
       if (e.key.toLowerCase() === "r") { e.preventDefault(); rescan(); }
       if (e.key === "Escape") {
+        if (selectedIds.size > 0) {
+          clearSelection();
+          return;
+        }
+        if (scenesOpen) { setScenesOpen(false); return; }
         if (searchQuery) {
           setSearchQuery("");
           searchInputRef.current?.blur();
@@ -680,15 +967,15 @@ function Dashboard() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [rescan, bootDone, searchQuery]);
+  }, [rescan, bootDone, searchQuery, selectedIds.size, clearSelection, scenesOpen]);
 
   const flushMasterVolume = useCallback(() => {
     const v = pendingMasterRef.current;
     pendingMasterRef.current = null;
     if (v !== null) {
-      bridgeRef.current?.setMasterVolume(v).catch((e) => showToast("error", "Master Volume Error", String(e)));
+      bridgeRef.current?.setMasterVolume(v).catch((e) => showToast("error", t("toast.masterVolumeError"), String(e)));
     }
-  }, [showToast]);
+  }, [showToast, t]);
 
   const handleMasterVolume = useCallback(
     (volume: number) => {
@@ -706,14 +993,14 @@ function Dashboard() {
 
   const handleMasterMute = useCallback((muted: boolean) => {
     setMaster((prev) => ({ ...prev, muted }));
-    bridgeRef.current?.setMasterMute(muted).catch((e) => showToast("error", "Master Mute Error", String(e)));
-  }, [showToast]);
+    bridgeRef.current?.setMasterMute(muted).catch((e) => showToast("error", t("toast.masterMuteError"), String(e)));
+  }, [showToast, t]);
 
   const handleOpenWindowsRouting = useCallback(() => {
     bridgeRef.current?.openWindowsAppVolume()
-      .then(() => showToast("info", "Windows App Volume", "Pick the output device for this app in the Windows page."))
-      .catch((e) => showToast("error", "Open Failed", String(e)));
-  }, [showToast]);
+      .then(() => showToast("info", t("toast.windowsAppVolume"), t("toast.windowsAppVolumeBody")))
+      .catch((e) => showToast("error", t("toast.openFailed"), String(e)));
+  }, [showToast, t]);
 
   // Route a single app session to an output device WITHOUT leaving SonoraMix
   // (persisted per-app default via Windows.Media.Internal.AudioPolicyConfig).
@@ -726,13 +1013,13 @@ function Dashboard() {
       bridgeRef.current
         ?.routeSessionDevice(session.pid, session.exe, deviceId)
         .then(() => {
-          showToast("ok", "App Routed", `${getDisplayName(session.exe)} → ${devName}`);
+          showToast("ok", t("toast.appRouted"), t("toast.appRoutedBody", { app: getDisplayName(session.exe), device: devName }));
           // Refresh so the channel shows its new device immediately.
           setRoutedDevices((prev) => ({ ...prev, [session.id]: deviceId }));
         })
-        .catch((e) => showToast("error", "Routing Failed", String(e)));
+        .catch((e) => showToast("error", t("toast.routingFailed"), String(e)));
     },
-    [devices, showToast],
+    [devices, showToast, t],
   );
 
   // Return an app to the system default output device.
@@ -742,16 +1029,16 @@ function Dashboard() {
       bridgeRef.current
         ?.resetSessionDevice(session.pid, session.exe)
         .then(() => {
-          showToast("ok", "Route Reset", `${getDisplayName(session.exe)} now uses the system default device.`);
+          showToast("ok", t("toast.routeReset"), t("toast.routeResetBody", { app: getDisplayName(session.exe) }));
           setRoutedDevices((prev) => {
             const next = { ...prev };
             delete next[session.id];
             return next;
           });
         })
-        .catch((e) => showToast("error", "Reset Failed", String(e)));
+        .catch((e) => showToast("error", t("toast.resetFailed"), String(e)));
     },
-    [showToast],
+    [showToast, t],
   );
 
   const handleToggleDevice = useCallback(
@@ -761,7 +1048,7 @@ function Dashboard() {
       b.toggleDeviceEnabled(deviceId, enabled)
         .then(() => {
           const devName = devices.find((d) => d.id === deviceId)?.name ?? deviceId;
-          showToast("ok", enabled ? "Device Enabled" : "Device Disabled", devName);
+          showToast("ok", enabled ? t("toast.deviceEnabled") : t("toast.deviceDisabled"), devName);
           // Re-fetch devices to update the state
           return b.getDevices();
         })
@@ -771,13 +1058,15 @@ function Dashboard() {
           return b.getSessions();
         })
         .then((s) => setSessions(s))
-        .catch((e) => showToast("error", "Device Toggle Failed", String(e)));
+        .catch((e) => showToast("error", t("toast.deviceToggleFailed"), String(e)));
     },
-    [devices, showToast],
+    [devices, showToast, t],
   );
 
   const isStreaming = stats.hz > 20;
   const deviceName = devices.find((d) => d.id === outputDeviceId)?.name ?? "";
+  const soloActive = Object.values(solo).some(Boolean);
+  const filteredCount = allFiltered.length;
 
   return (
     <MeterSettingsContext.Provider value={persisted.settings.meters}>
@@ -806,6 +1095,8 @@ function Dashboard() {
         onUpdate={updateSetting}
         appVersion={appVersion}
         desktop={isTauri()}
+        onExport={handleExport}
+        onImport={handleImport}
       />
 
       {(updateUi.kind === "available" || updateUi.kind === "downloading") && !updateDismissed && (
@@ -828,9 +1119,9 @@ function Dashboard() {
               <div className="h-3 w-3 rounded-full bg-signal shadow-[0_0_10px_rgba(255,121,64,0.6)]" />
               <div>
                 <h1 className="font-display text-[16px] font-bold tracking-tight text-ink-100">
-                  STUDIO MIXING CONSOLE
+                  {t("console.title")}
                 </h1>
-                <p className="typo-caption text-[10px]">Dual-Deck WASAPI Session Routing</p>
+                <p className="typo-caption text-[10px]">{t("console.subtitle")}</p>
               </div>
             </div>
 
@@ -843,7 +1134,7 @@ function Dashboard() {
                   ref={searchInputRef}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search channels… (Ctrl+F)"
+                  placeholder={t("console.search")}
                   className="h-[30px] w-[170px] rounded-lg bg-ink-900/80 border border-rule/50 pl-2.5 pr-7 text-[11px] font-mono text-ink-100 placeholder:text-ink-500 outline-none focus:border-route/50 transition-colors"
                   aria-label="Search channels"
                   onKeyDown={(e) => {
@@ -870,6 +1161,115 @@ function Dashboard() {
                 )}
               </div>
 
+              {/* Scenes (v1.2.0) */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setScenesOpen((o) => !o)}
+                  aria-expanded={scenesOpen}
+                  aria-haspopup="menu"
+                  className={`btn ${scenesOpen ? "btn-primary" : "btn-ghost"}`}
+                  title={t("scenes.title")}
+                >
+                  <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+                    <rect x="2" y="2" width="5" height="5" rx="1" />
+                    <rect x="9" y="2" width="5" height="5" rx="1" />
+                    <rect x="2" y="9" width="5" height="5" rx="1" />
+                    <rect x="9" y="9" width="5" height="5" rx="1" />
+                  </svg>
+                  <span className="hidden sm:inline text-[12px]">{t("scenes.title")}</span>
+                  {persisted.scenes.length > 0 && (
+                    <span className="led led-green" aria-hidden="true" />
+                  )}
+                </button>
+
+                {scenesOpen && (
+                  <div
+                    role="menu"
+                    className="absolute right-0 top-[calc(100%+6px)] z-50 w-[290px] rounded-xl border border-rule bg-panel/95 p-3 shadow-[0_18px_44px_rgba(0,0,0,0.55)] backdrop-blur-sm"
+                    style={{ animation: "fade-in 0.14s ease both" }}
+                  >
+                    <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-ink-400">
+                      {t("scenes.title")} — {persisted.scenes.length}
+                    </p>
+
+                    {/* Save current as... */}
+                    <div className="mb-2 flex items-center gap-1.5">
+                      <input
+                        value={sceneName}
+                        onChange={(e) => setSceneName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveScene(sceneName);
+                        }}
+                        placeholder={t("scenes.namePlaceholder")}
+                        aria-label={t("scenes.save")}
+                        className="h-7 min-w-0 flex-1 rounded-md border border-rule bg-ink-900/80 px-2 text-[11px] text-ink-100 placeholder:text-ink-500 outline-none focus:border-route/50"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => saveScene(sceneName)}
+                        disabled={!sceneName.trim()}
+                        className="btn btn-primary h-7 px-2.5 text-[10px] disabled:opacity-40"
+                      >
+                        {t("scenes.saveBtn")}
+                      </button>
+                    </div>
+
+                    {persisted.scenes.length === 0 ? (
+                      <p className="rounded-md border border-dashed border-rule/60 px-3 py-4 text-center text-[10px] text-ink-500">
+                        {t("scenes.empty")}
+                      </p>
+                    ) : (
+                      <div className="max-h-[240px] space-y-1.5 overflow-y-auto pr-0.5">
+                        {[...persisted.scenes].sort((a, b) => b.createdAt - a.createdAt).map((scene) => (
+                          <div
+                            key={scene.id}
+                            className="group flex items-center gap-2 rounded-lg border border-rule bg-ink-900/70 px-2 py-1.5"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-[11px] font-semibold text-ink-100">{scene.name}</p>
+                              <p className="text-[9px] text-ink-500">
+                                {new Date(scene.createdAt).toLocaleString()} · {Object.keys(scene.apps).length} ch
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => applyScene(scene)}
+                              title={t("scenes.apply")}
+                              aria-label={`${t("scenes.apply")}: ${scene.name}`}
+                              className="flex h-6 w-6 items-center justify-center rounded text-route transition-colors hover:bg-route/15"
+                            >
+                              <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                                <path d="M3 8l3.5 3.5L13 4.5" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => deleteScene(scene.id)}
+                              title={t("scenes.delete")}
+                              aria-label={`${t("scenes.delete")}: ${scene.name}`}
+                              className="flex h-6 w-6 items-center justify-center rounded text-ink-500 opacity-0 transition-all hover:bg-led-red/15 hover:text-led-red group-hover:opacity-100"
+                            >
+                              <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                                <path d="M3 3l10 10M13 3L3 13" strokeLinecap="round" />
+                              </svg>
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Ducking indicator */}
+              {duckingNow && (
+                <span className="flex items-center gap-1.5 rounded-lg border border-led-amber/40 bg-led-amber/10 px-2.5 py-1.5 text-[10px] font-bold tracking-wider text-led-amber animate-pulse">
+                  <span className="led led-amber" style={{ width: "5px", height: "5px" }} />
+                  AUTO-DUCK
+                </span>
+              )}
+
               <div className="flex items-center gap-1.5 bg-ink-900/80 p-1 rounded-lg border border-rule/50">
                 <button
                   type="button"
@@ -880,7 +1280,7 @@ function Dashboard() {
                       : "text-ink-300 hover:text-ink-100"
                   }`}
                 >
-                  🎛️ DUAL CONSOLE ({allFiltered.length})
+                  🎛️ {t("console.dual")} ({filteredCount})
                 </button>
                 <button
                   type="button"
@@ -891,7 +1291,7 @@ function Dashboard() {
                       : "text-ink-300 hover:text-ink-100"
                   }`}
                 >
-                  🔊 OUTPUTS ({outputSessions.length})
+                  🔊 {t("console.outputs")} ({outputSessions.length})
                 </button>
                 <button
                   type="button"
@@ -902,7 +1302,7 @@ function Dashboard() {
                       : "text-ink-300 hover:text-ink-100"
                   }`}
                 >
-                  🎙️ INPUTS ({inputSessions.length})
+                  🎙️ {t("console.inputs")} ({inputSessions.length})
                 </button>
               </div>
             </div>
@@ -942,10 +1342,10 @@ function Dashboard() {
                         </span>
                         <div>
                           <h2 className="font-display text-[14px] font-bold tracking-tight text-route">
-                            INPUT CONSOLE — MICROPHONES & RECORDING
+                            {t("inputConsole.title")}
                           </h2>
                           <p className="typo-caption text-[10px]">
-                            {inputSessions.length} ACTIVE CAPTURE CHANNEL{inputSessions.length === 1 ? "" : "S"}
+                            {inputSessions.length === 1 ? t("inputConsole.channel") : t("inputConsole.channels")}
                           </p>
                         </div>
                       </div>
@@ -954,12 +1354,10 @@ function Dashboard() {
                     {inputSessions.length === 0 ? (
                       <div className="rounded-lg border border-dashed border-rule/60 p-6 text-center">
                         <p className="typo-caption text-ink-300">
-                          {searchQuery ? `No channels match “${searchQuery}”` : "No microphone channels detected"}
+                          {searchQuery ? t("search.noMatch", { query: searchQuery }) : t("inputConsole.empty")}
                         </p>
                         <p className="mx-auto mt-1 max-w-md text-[11px] leading-relaxed text-ink-500">
-                          {searchQuery
-                            ? "Try a different search term or clear the filter."
-                            : "Windows only creates mic channels while an app is actually using the microphone — in a Discord call, OBS recording or voice chat. Start using your mic and the channel appears here automatically."}
+                          {searchQuery ? t("search.hint") : t("inputConsole.emptyHint")}
                         </p>
                         {searchQuery ? (
                           <button
@@ -970,7 +1368,7 @@ function Dashboard() {
                             }}
                             className="btn btn-ghost mt-3"
                           >
-                            Clear Search
+                            {t("search.clear")}
                           </button>
                         ) : (
                           <button type="button" onClick={rescan} className="btn btn-ghost mt-3">
@@ -985,7 +1383,7 @@ function Dashboard() {
                               <path d="M13 8a5 5 0 1 1-1.5-3.5" strokeLinecap="round" />
                               <path d="M13 1.5v3h-3" strokeLinecap="round" strokeLinejoin="round" />
                             </svg>
-                            Rescan Sessions
+                            {t("search.rescan")}
                           </button>
                         )}
                       </div>
@@ -1006,6 +1404,19 @@ function Dashboard() {
                             pinned={persisted.pinned.includes(s.id)}
                             onTogglePin={() => togglePin(s.id)}
                             onRename={(name) => renameChannel(s.exe, name)}
+                            soloed={!!solo[s.id]}
+                            soloActive={soloActive}
+                            onToggleSolo={() =>
+                              setSolo((prev) => ({ ...prev, [s.id]: !prev[s.id] }))
+                            }
+                            selected={selectedIds.has(s.id)}
+                            onSelect={() => toggleSelect(s.id)}
+                            dragging={dragSource === s.exe}
+                            dragOver={dragOverExe === s.exe}
+                            onDragStart={handleDragStart}
+                            onDragOver={handleDragOver}
+                            onDrop={handleDrop}
+                            onDragEnd={handleDragEnd}
                           />
                         ))}
                       </div>
@@ -1026,10 +1437,10 @@ function Dashboard() {
                         </span>
                         <div>
                           <h2 className="font-display text-[14px] font-bold tracking-tight text-signal">
-                            OUTPUT CONSOLE — APPLICATION PLAYBACK & GAMES
+                            {t("outputConsole.title")}
                           </h2>
                           <p className="typo-caption text-[10px]">
-                            {outputSessions.length} ACTIVE PLAYBACK CHANNEL{outputSessions.length === 1 ? "" : "S"}
+                            {outputSessions.length === 1 ? t("outputConsole.channel") : t("outputConsole.channels")}
                           </p>
                         </div>
                       </div>
@@ -1038,8 +1449,13 @@ function Dashboard() {
                     {outputSessions.length === 0 ? (
                       <div className="rounded-lg border border-dashed border-rule/60 p-6 text-center">
                         <p className="typo-caption text-ink-300">
-                          {searchQuery ? `No channels match “${searchQuery}”` : "No active playback audio sessions detected"}
+                          {searchQuery ? t("search.noMatch", { query: searchQuery }) : t("outputConsole.empty")}
                         </p>
+                        {!searchQuery && (
+                          <p className="mx-auto mt-1 max-w-md text-[11px] leading-relaxed text-ink-500">
+                            {t("outputConsole.emptyHint")}
+                          </p>
+                        )}
                         {searchQuery ? (
                           <button
                             type="button"
@@ -1049,11 +1465,11 @@ function Dashboard() {
                             }}
                             className="btn btn-primary mt-2"
                           >
-                            Clear Search
+                            {t("search.clear")}
                           </button>
                         ) : (
                           <button type="button" onClick={rescan} className="btn btn-primary mt-2">
-                            Rescan Audio Sessions
+                            {t("search.rescanOutput")}
                           </button>
                         )}
                       </div>
@@ -1079,6 +1495,19 @@ function Dashboard() {
                             onResetRoute={() => handleResetSession(s)}
                             onRoute={handleOpenWindowsRouting}
                             routedDeviceId={routedDevices[s.id]}
+                            soloed={!!solo[s.id]}
+                            soloActive={soloActive}
+                            onToggleSolo={() =>
+                              setSolo((prev) => ({ ...prev, [s.id]: !prev[s.id] }))
+                            }
+                            selected={selectedIds.has(s.id)}
+                            onSelect={() => toggleSelect(s.id)}
+                            dragging={dragSource === s.exe}
+                            dragOver={dragOverExe === s.exe}
+                            onDragStart={handleDragStart}
+                            onDragOver={handleDragOver}
+                            onDrop={handleDrop}
+                            onDragEnd={handleDragEnd}
                           />
                         ))}
                         <MasterStrip
@@ -1099,16 +1528,31 @@ function Dashboard() {
             </>
           )}
 
+          {/* Multi-select action bar */}
+          {selectedIds.size > 1 && (
+            <div className="glass-panel rounded-xl px-4 py-2.5 flex items-center justify-between gap-3">
+              <p className="text-[11px] font-semibold text-route">
+                {t("select.selected", { n: selectedIds.size })}
+              </p>
+              <div className="flex items-center gap-2">
+                <span className="hidden sm:inline text-[9px] text-ink-500">{t("select.multiHint")}</span>
+                <button type="button" onClick={clearSelection} className="btn btn-ghost text-[11px]">
+                  {t("select.clear")}
+                </button>
+              </div>
+            </div>
+          )}
+
         <div className="mt-4 text-center typo-caption text-ink-500 flex flex-wrap items-center justify-center gap-2 pb-2">
-          <span>SonoraMix v{appVersion} — Native WASAPI Session API · IPolicyConfig Endpoint Routing · 60 Hz Phase-Locked Stream</span>
+          <span>SonoraMix v{appVersion} — {t("footer.engine")}</span>
           <span className="text-rule/60">•</span>
           <button
             type="button"
             onClick={rescan}
             className="inline-flex items-center gap-1.5 rounded bg-ink-900/80 px-2 py-0.5 text-[11px] font-bold text-signal border border-signal/40 hover:bg-ink-800 hover:border-signal transition-all cursor-pointer shadow-sm"
-            title="Rescan audio sessions and devices (Hotkey: R)"
+            title={t("footer.rescan")}
           >
-            <span>🔄 RESCAN</span>
+            <span>🔄 {t("footer.rescan")}</span>
             <kbd className="inline-block min-w-[16px] rounded bg-ink-950 border border-rule/60 px-1 text-[9px] font-mono text-ink-300">R</kbd>
           </button>
         </div>
@@ -1125,7 +1569,7 @@ function Dashboard() {
         startedAt={startTimeRef.current}
       />
 
-      <ToastStack toasts={toasts} onDismiss={(id) => setToasts((prev) => prev.filter((t) => t.id !== id))} />
+      <ToastStack toasts={toasts} onDismiss={(id) => setToasts((prev) => prev.filter((tt) => tt.id !== id))} />
 
       {!bootDone && <BootOverlay version={appVersion} onDone={() => setBootDone(true)} />}
     </div>
@@ -1143,6 +1587,7 @@ function MasterStrip({ index, source, deviceName, sessionsCount, volume, muted, 
   onVolume: (volume: number) => void;
   onMute: (muted: boolean) => void;
 }) {
+  const t = useT();
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
 
@@ -1167,13 +1612,13 @@ function MasterStrip({ index, source, deviceName, sessionsCount, volume, muted, 
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <h3 className="truncate font-display text-[13px] font-bold tracking-tight text-signal">MASTER OUT</h3>
+            <h3 className="truncate font-display text-[13px] font-bold tracking-tight text-signal">{t("master.out")}</h3>
             <span className="shrink-0 rounded px-1 py-px text-[8px] font-bold tracking-wider uppercase text-signal bg-signal/15 border border-signal/40">
-              BUS
+              {t("master.bus")}
             </span>
           </div>
           <p className="mt-0.5 truncate font-mono text-[9px] text-ink-400" title={deviceName}>
-            {deviceName || "awaiting endpoint…"}
+            {deviceName || t("master.awaiting")}
           </p>
         </div>
       </div>
@@ -1226,7 +1671,7 @@ function MasterStrip({ index, source, deviceName, sessionsCount, volume, muted, 
           type="button"
           onClick={() => onMute(!muted)}
           aria-pressed={muted}
-          title={muted ? "Unmute master output" : "Mute master output"}
+          title={muted ? t("master.unmuteTitle") : t("master.muteTitle")}
           className={`inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2.5 text-[10px] font-bold tracking-wider transition-all ${
             muted
               ? "btn-mute-active"
@@ -1234,7 +1679,7 @@ function MasterStrip({ index, source, deviceName, sessionsCount, volume, muted, 
           }`}
         >
           <span className={`led ${muted ? "led-white" : "led-green"}`} style={{ width: "5px", height: "5px" }} />
-          {muted ? "MUTED" : "MUTE"}
+          {muted ? t("channel.muted") : t("channel.mute")}
         </button>
 
         <div className="flex items-center gap-1.5">
@@ -1312,14 +1757,10 @@ function ToastStack({ toasts, onDismiss }: { toasts: ToastItem[]; onDismiss: (id
   );
 }
 
-const BOOT_STEPS = [
-  { text: "Initializing COM apartment (MTA)", status: "OK" as const },
-  { text: "Scanning audio endpoints", status: "OK" as const },
-  { text: "Enumerating active WASAPI sessions", status: "OK" as const },
-  { text: "Meter stream · 60 Hz phase-locked", status: "LIVE" as const },
-];
+const BOOT_STEPS = ["boot.step1", "boot.step2", "boot.step3", "boot.step4"];
 
 function BootOverlay({ version, onDone }: { version: string; onDone: () => void }) {
+  const t = useT();
   const [count, setCount] = useState(0);
   const [fading, setFading] = useState(false);
   const doneRef = useRef(false);
@@ -1370,15 +1811,15 @@ function BootOverlay({ version, onDone }: { version: string; onDone: () => void 
       <p className="typo-caption mt-1.5">Audio Session Console · v{version}</p>
 
       <div className="mt-8 w-[min(400px,86vw)] space-y-1.5 font-mono text-[11px] text-ink-300">
-        {BOOT_STEPS.slice(0, count).map((step, i) => (
+        {BOOT_STEPS.slice(0, count).map((key, i) => (
           <div
-            key={step.text}
+            key={key}
             className="flex justify-between gap-3"
             style={{ animationDelay: `${i * 25}ms`, animation: "fade-in 0.22s ease both" }}
           >
-            <span className="leading-tight">{step.text}</span>
-            <span className={`font-semibold tracking-wide ${step.status === "LIVE" ? "text-led-green" : "text-route"}`}>
-              {step.status}
+            <span className="leading-tight">{t(key)}</span>
+            <span className={`font-semibold tracking-wide ${key === "boot.step4" ? "text-led-green" : "text-route"}`}>
+              {key === "boot.step4" ? "LIVE" : "OK"}
             </span>
           </div>
         ))}
@@ -1387,7 +1828,7 @@ function BootOverlay({ version, onDone }: { version: string; onDone: () => void 
         )}
       </div>
 
-      <p className="typo-caption absolute bottom-8">Click or press Esc to skip</p>
+      <p className="typo-caption absolute bottom-8">{t("boot.skip")}</p>
     </div>
   );
 }
