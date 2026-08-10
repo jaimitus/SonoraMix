@@ -36,6 +36,7 @@ import VumeterCanvas, { DbReadout } from "./components/VumeterCanvas";
 import { loadState, saveState, type AppSettings, type PersistedState } from "./settings";
 import { MeterSettingsContext } from "./meterContext";
 import { getDisplayName } from "./utils/names";
+import { volumeToDb } from "./utils/db";
 
 const ZERO_LEVEL: LevelSample = { peak: 0, left: 0, right: 0, ts: 0 };
 
@@ -1173,9 +1174,18 @@ function MasterStrip({ index, source, deviceName, sessionsCount, volume, muted, 
         {/* Fader Column */}
         <div className="flex w-[76px] flex-none flex-col items-center justify-between py-1">
           <Fader value={volume} onChange={onVolume} showValue={false} />
-          <span className="mt-1 font-mono text-[10px] font-bold text-signal tracking-wider">
-            {Math.round(volume * 100)}%
-          </span>
+          <div className="mt-1 flex flex-col items-center leading-none">
+            <span className="font-mono text-[10px] font-bold text-signal tracking-wider">
+              {Math.round(volume * 100)}%
+            </span>
+            <span
+              className={`mt-0.5 font-mono text-[8px] tracking-wider ${
+                volume <= 0.0001 ? "text-ink-500" : "text-signal/80"
+              }`}
+            >
+              {volumeToDb(volume)} dB
+            </span>
+          </div>
         </div>
 
         {/* dB Scale Markings */}
@@ -1211,11 +1221,11 @@ function MasterStrip({ index, source, deviceName, sessionsCount, volume, muted, 
           className={`inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2.5 text-[10px] font-bold tracking-wider transition-all ${
             muted
               ? "btn-mute-active"
-              : "bg-ink-800/80 text-ink-300 border border-rule/50 hover:bg-ink-700 hover:text-ink-100"
+              : "bg-ink-800/80 text-ink-300 border border-rule/50 hover:bg-led-red/15 hover:text-led-red hover:border-led-red/40"
           }`}
         >
-          <span className={`led ${muted ? "led-red" : "led-green"}`} style={{ width: "5px", height: "5px" }} />
-          {muted ? "MUTED" : "UNMUTE"}
+          <span className={`led ${muted ? "led-white" : "led-green"}`} style={{ width: "5px", height: "5px" }} />
+          {muted ? "MUTED" : "MUTE"}
         </button>
 
         <div className="flex items-center gap-1.5">

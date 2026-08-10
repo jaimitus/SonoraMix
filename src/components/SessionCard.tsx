@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AudioDeviceInfo, AudioSessionInfo, LevelSource } from "../types";
 import { getDisplayName } from "../utils/names";
+import { volumeToDb } from "../utils/db";
 import Fader from "./Fader";
 import VumeterCanvas, { DbReadout, PeakHoldReadout } from "./VumeterCanvas";
 
@@ -387,9 +388,18 @@ export default function SessionCard({
         {/* Fader Column (Left) */}
         <div className="flex w-[76px] flex-none flex-col items-center justify-between py-1">
           <Fader value={session.volume} onChange={(v) => onVolume(session.id, v)} showValue={false} />
-          <span className="mt-1 font-mono text-[10px] font-bold text-ink-200 tracking-wider">
-            {Math.round(session.volume * 100)}%
-          </span>
+          <div className="mt-1 flex flex-col items-center leading-none">
+            <span className="font-mono text-[10px] font-bold text-ink-200 tracking-wider">
+              {Math.round(session.volume * 100)}%
+            </span>
+            <span
+              className={`mt-0.5 font-mono text-[8px] tracking-wider ${
+                session.volume <= 0.0001 ? "text-ink-500" : "text-ink-400"
+              }`}
+            >
+              {volumeToDb(session.volume)} dB
+            </span>
+          </div>
         </div>
 
         {/* dB Scale Markings (Center Divider) */}
@@ -425,11 +435,11 @@ export default function SessionCard({
           className={`inline-flex h-7 items-center justify-center gap-1.5 rounded-md px-2.5 text-[10px] font-bold tracking-wider transition-all ${
             session.muted
               ? "btn-mute-active"
-              : "bg-ink-800/80 text-ink-300 border border-rule/50 hover:bg-ink-700 hover:text-ink-100"
+              : "bg-ink-800/80 text-ink-300 border border-rule/50 hover:bg-led-red/15 hover:text-led-red hover:border-led-red/40"
           }`}
         >
-          <span className={`led ${session.muted ? "led-red" : "led-green"}`} style={{ width: "5px", height: "5px" }} />
-          {session.muted ? "MUTED" : "UNMUTE"}
+          <span className={`led ${session.muted ? "led-white" : "led-green"}`} style={{ width: "5px", height: "5px" }} />
+          {session.muted ? "MUTED" : "MUTE"}
         </button>
 
         <div className="flex items-center gap-1.5">
