@@ -162,10 +162,19 @@ function Dashboard() {
       // clobber the freshly-routed value applied by handleRouteSession.
       if (fetchId !== routedFetchIdRef.current) return;
       setRoutedDevices((prev) => {
+        // Only ADD/UPDATE with confirmed non-empty values — a transient read
+        // failure (or an empty result while Windows is still applying a route)
+        // must NOT delete a device the user just routed; that made the bar
+        // silently revert to "System default" right after routing. Clearing
+        // happens via the explicit reset action, and entries for sessions that
+        // no longer exist (app closed) are pruned here.
         const next = { ...prev };
+        const liveIds = new Set(render.map((s) => s.id));
+        for (const id of Object.keys(next)) {
+          if (!liveIds.has(id)) delete next[id];
+        }
         pairs.forEach(([id, deviceId]) => {
           if (deviceId) next[id] = deviceId;
-          else delete next[id];
         });
         return next;
       });

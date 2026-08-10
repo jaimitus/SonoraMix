@@ -921,34 +921,72 @@ impl Drop for AudioPolicyConfig {
     }
 }
 
-/// Returns every live process id whose full image path equals `target_path`
-/// (case-insensitive). Used to route all instances of a multi-process app
-/// (e.g. Chrome with one session per tab) to the same output device.
-fn all_processes_with_image_path(target_path: &str) -> Vec<u32> {
-    let target_norm = target_path.to_lowercase();
-    let mut out = Vec::new();
+/// Converts a toolhelp `PROCESSENTRY32W.szExeFile` buffer to a Rust String
+/// (up to the first NUL).
+fn exe_name_of_entry(entry: &PROCESSENTRY32W) -> String {
+    let mut end = 0;
+    while end < entry.szExeFile.len() && entry.szExeFile[end] != 0 {
+        end += 1;
+    }
+    String::from_utf16_lossy(&entry.szExeFile[..end])
+}
+
+/// Returns true when `pid` still belongs to a process whose executable name
+/// matches `expected_exe` (case-insensitive). Verified via the toolhelp
+/// snapshot's `szExeFile`, which is populated WITHOUT opening the process — so
+/// elevated/protected processes (games with anti-cheat, admin apps) are
+/// covered too, while the recycled-pid guard is preserved.
+fn pid_belongs_to_exe(pid: u32, expected_exe: &str) -> bool {
+    unsafe {
+        let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            return false;
+        };
+        let _guard = ProcessHandle(snapshot);
+        let mut entry = PROCESSENTRY32W::default();
+        entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
+        if Process32FirstW(snapshot, &mut entry).is_err() {
+            return false;
+        }
+        loop {
+            if entry.th32ProcessID == pid {
+                return exe_name_of_entry(&entry).eq_ignore_ascii_case(expected_exe);
+            }
+            if Process32NextW(snapshot, &mut entry).is_err() {
+                break;
+            }
+        }
+    }
+    false
+}
+
+/// Verifies `pid` still belongs to `expected_exe` (recycled-pid guard) and
+/// returns every live process whose executable shares that name — so all
+/// instances of a multi-process app (e.g. Chrome with one session per tab)
+/// are routed together. Uses the toolhelp snapshot (`szExeFile` needs no
+/// OpenProcess), so elevated/protected apps can be routed too. Shared by
+/// routing and route-reset.
+fn processes_of(pid: u32, expected_exe: &str) -> SonoraResult<(String, Vec<u32>)> {
+    let mut pids = Vec::new();
+    let mut pid_present = false;
 
     unsafe {
         let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
-            warn!("process snapshot failed for routing");
-            return out;
+            return Err(SonoraError::Routing("process snapshot failed".to_string()));
         };
         let _guard = ProcessHandle(snapshot);
-
         let mut entry = PROCESSENTRY32W::default();
         entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
-
         if Process32FirstW(snapshot, &mut entry).is_err() {
-            return out;
+            return Err(SonoraError::Routing("process snapshot unavailable".to_string()));
         }
         loop {
-            let pid = entry.th32ProcessID;
-            if pid != 0 {
-                if let Ok(path) = process_image_path(pid) {
-                    if path.to_lowercase() == target_norm {
-                        out.push(pid);
-                    }
+            if entry.th32ProcessID != 0
+                && exe_name_of_entry(&entry).eq_ignore_ascii_case(expected_exe)
+            {
+                if entry.th32ProcessID == pid {
+                    pid_present = true;
                 }
+                pids.push(entry.th32ProcessID);
             }
             if Process32NextW(snapshot, &mut entry).is_err() {
                 break;
@@ -956,35 +994,14 @@ fn all_processes_with_image_path(target_path: &str) -> Vec<u32> {
         }
     }
 
-    out
-}
-
-/// Resolves `pid` to its executable path, verifies it still matches
-/// `expected_exe` (pid-reuse guard), and returns every live process sharing
-/// that image. Shared by routing and route-reset.
-fn processes_of(pid: u32, expected_exe: &str) -> SonoraResult<(String, Vec<u32>)> {
-    let exe_path = process_image_path(pid)
-        .map_err(|e| SonoraError::Routing(format!("resolving process {}: {}", pid, e)))?;
-    let exe = exe_path
-        .rsplit(['\\', '/'])
-        .next()
-        .unwrap_or_default();
-    if !exe.eq_ignore_ascii_case(expected_exe) {
+    if !pid_present {
         return Err(SonoraError::Routing(format!(
             "pid {} no longer belongs to {} (recycled?)",
             pid, expected_exe
         )));
     }
 
-    let pids = all_processes_with_image_path(&exe_path);
-    if pids.is_empty() {
-        return Err(SonoraError::Routing(format!(
-            "no running processes match {}",
-            exe_path
-        )));
-    }
-
-    Ok((exe_path, pids))
+    Ok((expected_exe.to_string(), pids))
 }
 
 /// Routes an application (every process sharing its executable) to a specific
@@ -1055,13 +1072,9 @@ fn unpack_endpoint_id(full_id: &str) -> String {
 pub fn get_session_routed_device(pid: u32, expected_exe: &str) -> SonoraResult<String> {
     ensure_com_init();
 
-    let exe_path = process_image_path(pid)
-        .map_err(|e| SonoraError::Routing(format!("resolving process {}: {}", pid, e)))?;
-    let exe = exe_path
-        .rsplit(['\\', '/'])
-        .next()
-        .unwrap_or_default();
-    if !exe.eq_ignore_ascii_case(expected_exe) {
+    // Recycled-pid guard via the toolhelp snapshot (no OpenProcess needed, so
+    // elevated/protected apps' routes still show in the UI).
+    if !pid_belongs_to_exe(pid, expected_exe) {
         return Ok(String::new()); // pid recycled — no reliable route info
     }
 
