@@ -1,6 +1,6 @@
 # 🎛️ SonoraMix — Professional Windows WASAPI Audio Session Console
 
-[![Release](https://img.shields.io/badge/Release-v1.1.0-ff7940?style=for-the-badge&logo=github)](https://github.com/jaimitus/SonoraMix/releases/tag/v1.1.0)
+[![Release](https://img.shields.io/badge/Release-v1.1.1-ff7940?style=for-the-badge&logo=github)](https://github.com/jaimitus/SonoraMix/releases/tag/v1.1.1)
 [![License](https://img.shields.io/badge/License-MIT-33d1b8?style=for-the-badge)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11%20x64-0078d4?style=for-the-badge&logo=windows)](https://github.com/jaimitus/SonoraMix)
 [![WASAPI](https://img.shields.io/badge/Engine-Native%20WASAPI-3fe082?style=for-the-badge)](https://github.com/jaimitus/SonoraMix)
@@ -31,6 +31,9 @@
 - **⚡ Instant WASAPI Notifications (v1.1.0)**: `IAudioSessionNotification` + `IMMNotificationClient` replace polling — sessions and devices appear/disappear the moment they change.
 - **🎯 In-App Per-App Routing (v1.1.0)**: Route any app to any output device **without leaving SonoraMix** (the same persisted mechanism the Windows settings page uses), see the current device per channel, and reset back to the system default with one click.
 - **⌨️ Global Hotkeys (v1.1.0)**: Mute the system mic from anywhere with <kbd>Ctrl+Shift+M</kbd> and show/hide the console with <kbd>Alt+Shift+S</kbd> — both fully configurable in Settings.
+- **🎛️ Console Redesign (v1.1.1)**: Rebuilt channel strips (wider 272px cards with zero text overflow), an always-visible **device routing bar** on every output channel, a full-width **MASTER OUT bus** that stands apart from the channels, and a vivid high-contrast VU palette.
+- **🎚️ Configurable VU Meters (v1.1.1)**: Tune your meters in Settings — 5 color presets (Vivid, Classic, Neon, Ice, Mono), custom per-zone colors (green/amber/red), brightness (50–150%), LED segment size (Compact/Standard/Large) and peak-hold visibility. All persisted across restarts.
+- **🧪 Browser Demo Mode (v1.1.1)**: Append `?demo=1` to the URL to preview the full console with synthetic channels and live meters in any browser — no WASAPI required.
 - **⚡ System Tray Integration**: Minimizes silently to the Windows System Tray for unobtrusive background operation.
 
 ---
@@ -39,7 +42,7 @@
 
 ```
 +-----------------------------------------------------------------------------------+
-|  SonoraMix v1.1.0 — STUDIO MIXING CONSOLE                                          |
+|  SonoraMix v1.1.1 — STUDIO MIXING CONSOLE                                          |
 |  [🔊 Output: Realtek Speakers ]   [🎙️ Mic: USB Microphone ]   [WASAPI LIVE] [⚙️]  |
 +-----------------------------------------------------------------------------------+
 |  [ 🎛️ DUAL CONSOLE ]            [ 🔊 OUTPUTS (4) ]            [ 🎙️ INPUTS (2) ]  |
@@ -54,25 +57,25 @@
 |  +--------------------+  +--------------------+                                   |
 |                                                                                   |
 |  🔊 OUTPUT CONSOLE — APPLICATION PLAYBACK & MUSIC                                 |
-|  +--------------------+  +--------------------+  +--------------------+           |
-|  | Spotify            |  | Counter-Strike 2   |  | MASTER BUS         |           |
-|  | → Headphones (USB) |  | → System default   |  | [Fader] [dB] [VU]  |           |
-|  | [Fader] [dB] [VU]  |  | [Fader] [dB] [VU]  |  |                    |           |
-|  +--------------------+  +--------------------+  +--------------------+           |
+|  +--------------------+  +--------------------+  +----------------------------+    |
+|  | Spotify            |  | Counter-Strike 2   |  | MASTER OUT BUS (full width)|    |
+|  | [→ System default] |  | [→ WH-1000XM4]    |  | [Fader] [Wide VU] [Mute]  |    |
+|  | [Fader] [dB] [VU]  |  | [Fader] [dB] [VU]  |  |  → device routing bar      |    |
+|  +--------------------+  +--------------------+  +----------------------------+    |
 +-----------------------------------------------------------------------------------+
 ```
 
 ---
 
-## 📦 Downloads & Releases (v1.1.0)
+## 📦 Downloads & Releases (v1.1.1)
 
-Grab the latest pre-compiled release for Windows 10/11 x64 on the [**Releases Page**](https://github.com/jaimitus/SonoraMix/releases/tag/v1.1.0):
+Grab the latest pre-compiled release for Windows 10/11 x64 on the [**Releases Page**](https://github.com/jaimitus/SonoraMix/releases/tag/v1.1.1):
 
 | Package | File | Size | Description |
 | :--- | :--- | :--- | :--- |
 | 🚀 **Standalone Portable** | [`sonoramix.exe`](https://github.com/jaimitus/SonoraMix/releases) | ~6 MB | Single executable, zero installation required. |
-| 📦 **NSIS Setup Installer** | [`SonoraMix_1.1.0_x64-setup.exe`](https://github.com/jaimitus/SonoraMix/releases) | ~2 MB | Standard Windows installer with Start Menu & Desktop shortcuts. |
-| 🛡️ **MSI Package** | [`SonoraMix_1.1.0_x64_en-US.msi`](https://github.com/jaimitus/SonoraMix/releases) | ~2.7 MB | Windows Installer package for enterprise deployment. |
+| 📦 **NSIS Setup Installer** | [`SonoraMix_1.1.1_x64-setup.exe`](https://github.com/jaimitus/SonoraMix/releases) | ~2 MB | Standard Windows installer with Start Menu & Desktop shortcuts. |
+| 🛡️ **MSI Package** | [`SonoraMix_1.1.1_x64_en-US.msi`](https://github.com/jaimitus/SonoraMix/releases) | ~2.7 MB | Windows Installer package for enterprise deployment. |
 
 > 💡 **Automatic updates require an installed package (NSIS or MSI).** The portable `sonoramix.exe` does not self-update — download the new portable from the Releases page instead.
 
@@ -114,8 +117,8 @@ npm run tauri build
 
 Binary outputs will be generated in:
 - Portable: `src-tauri/target/release/sonoramix.exe`
-- NSIS Setup: `src-tauri/target/release/bundle/nsis/SonoraMix_1.1.0_x64-setup.exe`
-- MSI: `src-tauri/target/release/bundle/msi/SonoraMix_1.1.0_x64_en-US.msi`
+- NSIS Setup: `src-tauri/target/release/bundle/nsis/SonoraMix_1.1.1_x64-setup.exe`
+- MSI: `src-tauri/target/release/bundle/msi/SonoraMix_1.1.1_x64_en-US.msi`
 
 ### Publishing a new update (maintainers)
 1. Bump the version in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `package.json`.

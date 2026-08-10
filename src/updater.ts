@@ -11,7 +11,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
 
 /** Compile-time fallback version — kept in sync with `tauri.conf.json`. */
-export const APP_VERSION = "1.1.0";
+export const APP_VERSION = "1.1.1";
 
 /** True when running inside the Tauri webview (vs. a plain browser). */
 export function isTauri(): boolean {
