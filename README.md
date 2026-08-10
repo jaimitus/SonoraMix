@@ -31,7 +31,7 @@
 - **⚡ Instant WASAPI Notifications (v1.1.0)**: `IAudioSessionNotification` + `IMMNotificationClient` replace polling — sessions and devices appear/disappear the moment they change.
 - **🎯 In-App Per-App Routing (v1.1.0)**: Route any app to any output device **without leaving SonoraMix** (the same persisted mechanism the Windows settings page uses), see the current device per channel, and reset back to the system default with one click.
 - **⌨️ Global Hotkeys (v1.1.0)**: Mute the system mic from anywhere with <kbd>Ctrl+Shift+M</kbd> and show/hide the console with <kbd>Alt+Shift+S</kbd> — both fully configurable in Settings.
-- **🎛️ Console Redesign (v1.1.1)**: Rebuilt channel strips (wider 272px cards with zero text overflow), an always-visible **device routing bar** on every output channel, a full-width **MASTER OUT bus** that stands apart from the channels, and a vivid high-contrast VU palette.
+- **🎛️ Console Redesign (v1.1.1)**: Rebuilt channel strips (wider 272px cards with zero text overflow), an always-visible **device routing bar** on every output channel, a **MASTER OUT card** that keeps the same footprint as the channels but stands apart with its own orange identity, and a vivid high-contrast VU palette.
 - **🎚️ Configurable VU Meters (v1.1.1)**: Tune your meters in Settings — 5 color presets (Vivid, Classic, Neon, Ice, Mono), custom per-zone colors (green/amber/red), brightness (50–150%), LED segment size (Compact/Standard/Large) and peak-hold visibility. All persisted across restarts.
 - **🧪 Browser Demo Mode (v1.1.1)**: Append `?demo=1` to the URL to preview the full console with synthetic channels and live meters in any browser — no WASAPI required.
 - **⚡ System Tray Integration**: Minimizes silently to the Windows System Tray for unobtrusive background operation.
@@ -57,11 +57,11 @@
 |  +--------------------+  +--------------------+                                   |
 |                                                                                   |
 |  🔊 OUTPUT CONSOLE — APPLICATION PLAYBACK & MUSIC                                 |
-|  +--------------------+  +--------------------+  +----------------------------+    |
-|  | Spotify            |  | Counter-Strike 2   |  | MASTER OUT BUS (full width)|    |
-|  | [→ System default] |  | [→ WH-1000XM4]    |  | [Fader] [Wide VU] [Mute]  |    |
-|  | [Fader] [dB] [VU]  |  | [Fader] [dB] [VU]  |  |  → device routing bar      |    |
-|  +--------------------+  +--------------------+  +----------------------------+    |
+|  +--------------------+  +--------------------+  +--------------------+           |
+|  | Spotify            |  | Counter-Strike 2   |  | MASTER OUT         |           |
+|  | [→ System default] |  | [→ WH-1000XM4]    |  | [Fader] [dB] [VU]  |           |
+|  | [Fader] [dB] [VU]  |  | [Fader] [dB] [VU]  |  |  (orange identity)  |           |
+|  +--------------------+  +--------------------+  +--------------------+           |
 +-----------------------------------------------------------------------------------+
 ```
 
